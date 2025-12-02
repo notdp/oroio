@@ -1,0 +1,854 @@
+#!/usr/bin/env bash
+# droid key manager: 管理 Factory droid API keys、查询用量、自动轮换
+set -euo pipefail
+
+DKM_HOME="$HOME/.oroio"
+KEYS_FILE="$DKM_HOME/keys.tsv"   # 每行: key<TAB>label（label可为空）
+CURRENT_FILE="$DKM_HOME/current" # 保存当前key的行号（从1开始）
+
+usage() {
+  cat <<'EOF'
+Usage: dk <command> [args]
+Commands:
+  add <key...>           add keys (or --file <path>)
+  list                   list keys with balance/expiry
+  current                show current key + export + clipboard
+  use [index]            switch key (interactive if no index)
+  run <cmd...>           run with key (auto-rotate on zero balance)
+  rm <index...>          remove keys
+  help                   show this help
+EOF
+}
+
+die() { echo "错误: $*" >&2; exit 1; }
+
+ensure_store() {
+  mkdir -p "$DKM_HOME"
+  touch "$KEYS_FILE"
+  if [ ! -s "$CURRENT_FILE" ]; then echo 1 >"$CURRENT_FILE"; fi
+}
+
+mask_key() {
+  local k="$1"
+  local len=${#k}
+  if (( len <= 10 )); then
+    echo "${k:0:3}***"
+  else
+    echo "${k:0:6}...${k: -4}"
+  fi
+}
+
+load_keys() {
+  mapfile -t KEYS < <(grep -v '^[[:space:]]*$' "$KEYS_FILE" || true)
+}
+
+save_keys() {
+  printf "%s\n" "${KEYS[@]}" >"$KEYS_FILE"
+}
+
+copy_to_clipboard() {
+  local text="$1"
+  if command -v pbcopy >/dev/null 2>&1; then
+    printf "%s" "$text" | pbcopy && return 0
+  elif command -v wl-copy >/dev/null 2>&1; then
+    printf "%s" "$text" | wl-copy && return 0
+  elif command -v xclip >/dev/null 2>&1; then
+    printf "%s" "$text" | xclip -selection clipboard && return 0
+  elif command -v xsel >/dev/null 2>&1; then
+    printf "%s" "$text" | xsel --clipboard --input && return 0
+  fi
+  return 1
+}
+
+fetch_usage() {
+  local key="$1"
+  local resp
+  if ! resp=$(curl -sS -X GET 'https://app.factory.ai/api/organization/members/chat-usage' \
+    -H "Authorization: Bearer ${key}" \
+    -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'); then
+    printf "BALANCE=\nBALANCE_NUM=\nTOTAL=\nUSED=\nEXPIRES=?\nEXPIRES_FULL=?\nEXPIRES_TS=\nRAW=curl_error\n"
+    return
+  fi
+  if ! printf "%s" "$resp" | jq -r '
+    def n(v): if v==null then "" else (v|tostring) end;
+    def tot(s): if s==null then null else (s.totalAllowance // s.basicAllowance // s.allowance // null) end;
+    def used(s): if s==null then null else (s.orgTotalTokensUsed // s.used // s.tokensUsed // 0) end;
+    def over(s): if s==null then null else (s.orgOverageUsed // 0) end;
+    (.usage) as $u |
+    ($u | (.endDate // .expire_at // .expires_at)) as $exp_raw |
+    ([ $u.standard, $u.premium, $u.total, $u.main ]
+      | map(select(. != null) | {total: tot(.), used: ((used(.) // 0) + (over(.) // 0))})
+      | map(select(.total != null))
+      | (.[0] // {})) as $s |
+    ($s.total) as $total |
+    ($s.used) as $used |
+    (if ($total==null or $used==null) then null else ($total - $used) end) as $remain |
+    ($exp_raw | if .==null then null else (try ((.|tonumber)/1000) catch .) end) as $exp_ts |
+    {
+      BALANCE: $remain,
+      BALANCE_NUM: $remain,
+      TOTAL: $total,
+      USED: $used,
+      EXPIRES: (if $exp_ts==null then ($exp_raw|tostring) else ( $exp_ts | strftime("%Y-%m-%d") ) end),
+      EXPIRES_FULL: (if $exp_ts==null then ($exp_raw|tostring) else ( $exp_ts | strftime("%Y-%m-%d %H:%M:%S %Z") ) end),
+      EXPIRES_TS: $exp_ts,
+      RAW: ""
+    }
+    | to_entries
+    | map("\(.key)=\(n(.value))")
+    | .[]
+  '; then
+    printf "BALANCE=\nBALANCE_NUM=\nTOTAL=\nUSED=\nEXPIRES=?\nEXPIRES_FULL=?\nEXPIRES_TS=\nRAW=jq_error\n"
+  fi
+}
+
+current_index() {
+  local idx
+  idx=$(cat "$CURRENT_FILE" 2>/dev/null || echo 1)
+  if ! [[ "$idx" =~ ^[0-9]+$ ]] || (( idx < 1 )); then idx=1; fi
+  echo "$idx"
+}
+
+set_current() {
+  local idx="$1"
+  echo "$idx" >"$CURRENT_FILE"
+}
+
+color_mode_enabled() {
+  case "${DKM_COLOR:-always}" in
+    always) return 0;;
+    never) return 1;;
+    auto) [ -t 1 ] && return 0 || return 1;;
+    *) return 0;;
+  esac
+}
+
+human_num() {
+  local n="$1"
+  if [[ -z "$n" ]]; then echo "?"; return; fi
+  awk -v n="$n" 'BEGIN{ if (n=="" || n=="null") {print "?"} else {printf "%.0f", n} }'
+}
+
+compact_num() {
+  local n="$1"
+  if [[ -z "$n" ]]; then echo "?"; return; fi
+  awk -v n="$n" 'BEGIN{
+    if (n=="" || n=="null") {print "?" ; exit}
+    n += 0
+    abs = (n<0)?-n:n
+    if (abs >= 1e9) printf "%.1fB", n/1e9;
+    else if (abs >= 1e6) printf "%.1fM", n/1e6;
+    else if (abs >= 1e3) printf "%.1fk", n/1e3;
+    else printf "%.0f", n;
+  }' | sed -E 's/\\.0([kMB])$/\\1/'
+}
+
+is_num() {
+  [[ "$1" =~ ^-?[0-9]+([.][0-9]+)?$ ]]
+}
+
+color_red() {
+  if color_mode_enabled; then printf "\033[31m%s\033[0m" "$1"; else printf "%s" "$1"; fi
+}
+
+color_cyan_bold() {
+  if color_mode_enabled; then printf "\033[1;36m%s\033[0m" "$1"; else printf "%s" "$1"; fi
+}
+
+color_black_bold() {
+  if color_mode_enabled; then printf "\033[1;30m%s\033[0m" "$1"; else printf "%s" "$1"; fi
+}
+
+color_cyan() {
+  if color_mode_enabled; then printf "\033[36m%s\033[0m" "$1"; else printf "%s" "$1"; fi
+}
+
+strip_ansi() {
+  local s="$1"
+  if command -v perl >/dev/null 2>&1; then
+    printf "%s" "$s" | perl -pe 's/\e\[[0-9;]*[A-Za-z]//g'
+  else
+    printf "%s" "$s" | sed -E $'s/\\x1B\\[[0-9;]*[A-Za-z]//g'
+  fi
+}
+
+pad_cell() {
+  local text="$1" width="$2"
+  local plain len pad
+  plain=$(strip_ansi "$text")
+  len=${#plain}
+  pad=0
+  if (( width > len )); then pad=$((width-len)); fi
+  printf "%s%*s" "$text" "$pad" ""
+}
+
+clip_pad() {
+  local text="$1" width="$2"
+  local plain trimmed
+  plain=$(strip_ansi "$text")
+  local len=${#plain}
+  if (( len > width )); then
+    if (( width > 1 )); then
+      trimmed="${plain:0:$((width-1))}…"
+    else
+      trimmed="${plain:0:$width}"
+    fi
+    text="$trimmed"
+  fi
+  pad_cell "$text" "$width"
+}
+
+render_bar() {
+  local remain="$1" total="$2" len="${3:-20}"
+  (( len < 1 )) && len=1
+  if [[ -z "$total" ]] || ! [[ "$total" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    printf "["; printf '%*s' "$len" "" | tr ' ' '?'; printf "]\n"
+    return
+  fi
+  local used
+  if [[ -n "$remain" ]] && [[ "$remain" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    used=$(awk -v tot="$total" -v rem="$remain" 'BEGIN{u=tot-rem; if(u<0)u=0; if(u>tot)u=tot; printf "%.6f", u}')
+  else
+    used="$total"
+  fi
+  local fill
+  fill=$(awk -v u="$used" -v t="$total" -v l="$len" 'BEGIN{ if(t==0){print 0; exit} r=u/t; if(r<0)r=0; if(r>1)r=1; printf "%d", int(r*l+0.5)}')
+  local hashes=$(printf '%*s' "$fill" | tr ' ' '#')
+  local dashes=$(printf '%*s' $((len-fill)) | tr ' ' '-')
+  echo "[${hashes}${dashes}]"
+}
+
+render_usage_text() {
+  local used="$1" total="$2" remain="$3"
+  if [[ -z "$total" ]] || ! [[ "$total" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    echo "?/?"
+    return
+  fi
+  if [[ -z "$used" ]] || ! [[ "$used" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    if [[ -n "$remain" ]] && [[ "$remain" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+      used=$(awk -v tot="$total" -v rem="$remain" 'BEGIN{u=tot-rem; if(u<0)u=0; printf "%.6f", u}')
+    else
+      used=0
+    fi
+  fi
+  printf "%s/%s" "$(compact_num "$used")" "$(compact_num "$total")"
+}
+
+calc_remain() {
+  local balnum="$1" total="$2" used="$3"
+  if is_num "$balnum"; then
+    echo "$balnum"; return
+  fi
+  if is_num "$total" && is_num "$used"; then
+    awk -v t="$total" -v u="$used" 'BEGIN{printf "%.6f", t-u}'
+    return
+  fi
+  echo ""
+}
+
+is_low_remain() {
+  local remain="$1" total="$2"
+  if ! is_num "$remain" || ! is_num "$total"; then return 1; fi
+  awk -v r="$remain" -v t="$total" 'BEGIN{ if (t<=0) exit 1; if (r/t <= 0.10) exit 0; else exit 1 }'
+}
+
+prompt_select() {
+  if [ $# -lt 2 ]; then return 1; fi
+  local prompt="$1"; shift
+  local -a options=("$@")
+  local count=${#options[@]}
+  [ "$count" -gt 0 ] || return 1
+  if [ ! -t 0 ] || [ ! -t 2 ]; then return 2; fi
+
+  local selected=0 typed="" lines=0
+  local hl_start="" hl_end=""
+  if color_mode_enabled; then
+    hl_start=$'\033[36m'
+    hl_end=$'\033[0m'
+  fi
+  local read_timeout_short='0.05'
+  if [ -z "${BASH_VERSINFO+x}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    read_timeout_short=1
+  fi
+  while true; do
+    lines=1
+    printf '%s\n' "$prompt" >&2
+    local idx=0 line
+    while [ "$idx" -lt "$count" ]; do
+      line="${options[$idx]}"
+      if [ "$idx" -eq "$selected" ]; then
+        printf '%s> %s%s\n' "$hl_start" "$line" "$hl_end" >&2
+      else
+        printf '  %s\n' "$line" >&2
+      fi
+      lines=$((lines+1))
+      idx=$((idx+1))
+    done
+
+    local key=""
+    if ! IFS= read -rsn1 key; then printf '\n' >&2; return 1; fi
+    [ -z "$key" ] && key=$'\n'
+
+    case "$key" in
+      $'\n'|$'\r')
+        if [ -n "$typed" ]; then
+          local choice=$((10#$typed))
+          if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            printf '\n' >&2
+            printf '%d\n' "$((choice-1))"
+            return 0
+          fi
+          typed=""
+        else
+          printf '\n' >&2
+          printf '%d\n' "$selected"
+          return 0
+        fi
+        ;;
+      $'\x1b')
+        local key2=""
+        if IFS= read -rsn1 -t "$read_timeout_short" key2; then
+          if [ "$key2" = "[" ]; then
+            local key3=""
+            if IFS= read -rsn1 -t "$read_timeout_short" key3; then
+              case "$key3" in
+                A) selected=$(((selected-1+count)%count)); typed="";;
+                B) selected=$(((selected+1)%count)); typed="";;
+              esac
+            fi
+          elif [ "$key2" = $'\x1b' ]; then
+            printf '\n' >&2; return 1
+          fi
+        else
+          printf '\n' >&2; return 1
+        fi
+        ;;
+      $'\177')
+        [ -n "$typed" ] && typed="${typed%?}"
+        ;;
+      [0-9])
+        typed="${typed}${key}"
+        local choice=$((10#$typed))
+        if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+          selected=$((choice-1))
+        elif [ "$choice" -gt "$count" ]; then
+          typed="$key"
+          choice=$((10#$typed))
+          if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            selected=$((choice-1))
+          else
+            typed=""
+          fi
+        fi
+        ;;
+      q|Q)
+        printf '\n' >&2; return 1;;
+      k|K) selected=$(((selected-1+count)%count)); typed="";;
+      j|J) selected=$(((selected+1)%count)); typed="";;
+      *) ;;
+    esac
+
+    printf '\033[%dA' "$lines" >&2
+    printf '\033[J' >&2
+  done
+}
+
+fit_col() {
+  local s="$1" w="$2"
+  local len=${#s}
+  if (( len <= w )); then
+    printf "%s" "$s"
+  else
+    (( w<=3 )) && { printf "%.*s" "$w" "$s"; return; }
+    printf "%s" "${s:0:$((w-3))}..."
+  fi
+}
+
+auto_rotate_if_needed() {
+  ensure_store
+  load_keys
+  local n=${#KEYS[@]}
+  [ $n -gt 0 ] || die "暂无key，请先添加。"
+  local cur=$(current_index)
+  (( cur<=n )) || cur=1
+  local checked=0
+  while (( checked < n )); do
+    IFS=$'\t' read -r key _ <<<"${KEYS[$((cur-1))]}"
+    info=$(fetch_usage "$key")
+    local balnum total used
+    while IFS='=' read -r k v; do
+      case "$k" in
+        BALANCE_NUM) balnum="$v";;
+        TOTAL) total="$v";;
+        USED) used="$v";;
+      esac
+    done <<<"$info"
+    local remain
+    remain=$(calc_remain "$balnum" "$total" "$used")
+    if [[ -z "$remain" ]]; then
+      set_current "$cur"
+      return
+    fi
+    if awk -v r="$remain" 'BEGIN{exit !(r>0)}'; then
+      set_current "$cur"
+      return
+    fi
+    cur=$((cur % n + 1))
+    ((checked++))
+  done
+  die "所有key余额都为0，请添加新key。"
+}
+
+cmd_add() {
+  ensure_store
+  local file_mode=0 file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f|--file) file_mode=1; file="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) break;;
+    esac
+  done
+  ensure_store
+  if (( file_mode )); then
+    [ -f "$file" ] || die "文件不存在: $file"
+    while IFS= read -r line; do
+      line=${line%%#*}
+      line=$(echo "$line" | xargs)
+      [ -z "$line" ] && continue
+      echo -e "${line}\t" >>"$KEYS_FILE"
+    done <"$file"
+  else
+    [ $# -gt 0 ] || die "请提供至少一个key"
+    for k in "$@"; do
+      echo -e "${k}\t" >>"$KEYS_FILE"
+    done
+  fi
+  echo "已添加。当前共有 $(grep -cv '^[[:space:]]*$' "$KEYS_FILE") 个key。"
+}
+
+cmd_list() {
+  ensure_store
+  load_keys
+  if [ ${#KEYS[@]} -eq 0 ]; then echo "暂无key，使用 'dk add' 添加。"; return; fi
+  local cur cols
+  cur=$(current_index)
+  cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+
+  local expw=12           # Expiry 列固定宽度
+  local keyw=24 progw=34  # 默认列宽
+  local min_key=14 min_prog=20
+
+  # 行总宽度估算 = 各列宽 + 分隔符/空格(约17)
+  local total_needed=$(( keyw + progw + expw + 17 ))
+  if (( total_needed > cols )); then
+    local over=$(( total_needed - cols ))
+    local cut=$(( progw - min_prog ))
+    if (( cut > 0 )); then
+      local delta=$(( over < cut ? over : cut ))
+      progw=$(( progw - delta ))
+      over=$(( over - delta ))
+    fi
+    if (( over > 0 )); then
+      cut=$(( keyw - min_key ))
+      if (( cut > 0 )); then
+        local delta=$(( over < cut ? over : cut ))
+        keyw=$(( keyw - delta ))
+        over=$(( over - delta ))
+      fi
+    fi
+  fi
+
+  # 预渲染数据（避免重复请求）；使用全局统一的进度条长度保证用量对齐
+  local -a ROW_NO ROW_KEY ROW_EXP USAGE_TXT BALNUM_ARR TOTAL_ARR REMAIN_ARR
+  local i=0 max_usage_len=0
+  for line in "${KEYS[@]}"; do
+    ((++i))
+    IFS=$'\t' read -r key label <<<"$line"
+    label=${label:-}
+    info=$(fetch_usage "$key")
+    local bal balnum total used exp exp_full
+    while IFS='=' read -r k v; do
+      case "$k" in
+        BALANCE) bal="$v";;
+        BALANCE_NUM) balnum="$v";;
+        TOTAL) total="$v";;
+        USED) used="$v";;
+        EXPIRES) exp="$v";;
+        EXPIRES_FULL) exp_full="$v";;
+      esac
+    done <<<"$info"
+
+    remain=$(calc_remain "$balnum" "$total" "$used")
+    local display_usage
+    display_usage=$(render_usage_text "$used" "$total" "$balnum")
+    (( ${#display_usage} > max_usage_len )) && max_usage_len=${#display_usage}
+
+    local key_disp marker row_key row_exp
+    key_disp=$(mask_key "$key")
+    marker=$([ "$i" -eq "$cur" ] && echo "$(color_cyan "▶") " || echo "  ")
+    row_key="${marker}${key_disp}"
+
+    row_exp="${exp:-?}"; [ "${row_exp,,}" = "null" ] && row_exp="?"
+
+    ROW_NO+=("$i")
+    ROW_KEY+=("$row_key")
+    ROW_EXP+=("$row_exp")
+    USAGE_TXT+=("$display_usage")
+    BALNUM_ARR+=("$balnum")
+    TOTAL_ARR+=("$total")
+    REMAIN_ARR+=("$remain")
+  done
+
+  # 全局统一的进度条长度，确保用量数字纵向对齐
+  local bar_len_global=$(( progw - max_usage_len - 3 ))  # [] + 空格
+  (( bar_len_global < 1 )) && bar_len_global=1
+
+  # 生成最终行的用量文本
+  local -a ROW_USAGE
+  for ((i=0; i<${#KEYS[@]}; i++)); do
+    local bar usage_txt remain total balnum
+    usage_txt="${USAGE_TXT[$i]}"
+    balnum="${BALNUM_ARR[$i]}"
+    total="${TOTAL_ARR[$i]}"
+    remain="${REMAIN_ARR[$i]}"
+    bar=$(render_bar "$balnum" "$total" "$bar_len_global")
+    if is_low_remain "$remain" "$total"; then
+      ROW_USAGE+=( "$(color_red "$bar") $(color_red "$usage_txt")" )
+    else
+      ROW_USAGE+=( "${bar} ${usage_txt}" )
+    fi
+  done
+
+  local h1 h2 h3 h4
+  h1=$(color_black_bold "No")
+  h2=$(color_black_bold "Key")
+  h3=$(color_black_bold "Usage")
+  h4=$(color_black_bold "Expiry")
+  local top mid bot
+  top=$(printf "┌%s┬%s┬%s┬%s┐" \
+    "$(printf '%*s' $((4+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((keyw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((progw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((expw+2)) '' | tr ' ' '─')")
+  mid=$(printf "├%s┼%s┼%s┼%s┤" \
+    "$(printf '%*s' $((4+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((keyw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((progw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((expw+2)) '' | tr ' ' '─')")
+  bot=$(printf "└%s┴%s┴%s┴%s┘" \
+    "$(printf '%*s' $((4+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((keyw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((progw+2)) '' | tr ' ' '─')" \
+    "$(printf '%*s' $((expw+2)) '' | tr ' ' '─')")
+
+  printf "%s\n" "$top"
+  printf "│ %s │ %s │ %s │ %s │\n" \
+    "$(pad_cell "$h1" 4)" \
+    "$(pad_cell "$h2" $keyw)" \
+    "$(pad_cell "$h3" $progw)" \
+    "$(pad_cell "$h4" $expw)"
+  printf "%s\n" "$mid"
+
+  local idx=0
+  for _ in "${KEYS[@]}"; do
+    local key_cell usage_cell exp_cell
+    key_cell=$(clip_pad "${ROW_KEY[$idx]}" "$keyw")
+    usage_cell=$(clip_pad "${ROW_USAGE[$idx]}" "$progw")
+    exp_cell=$(clip_pad "${ROW_EXP[$idx]}" $expw)
+    printf "│ %s │ %s │ %s │ %s │\n" \
+      "$(pad_cell "${ROW_NO[$idx]}" 4)" \
+      "$key_cell" \
+      "$usage_cell" \
+      "$exp_cell"
+    ((++idx))
+  done
+  printf "%s\n" "$bot"
+}
+
+cmd_current() {
+  ensure_store
+  load_keys
+  [ ${#KEYS[@]} -gt 0 ] || die "暂无key，请先添加。"
+  local idx cur
+  cur=$(current_index)
+  if (( cur > ${#KEYS[@]} )); then cur=1; fi
+  IFS=$'\t' read -r key label <<<"${KEYS[$((cur-1))]}"
+  info=$(fetch_usage "$key")
+  local bal exp exp_full balnum total used
+  while IFS='=' read -r k v; do
+    case "$k" in
+      BALANCE) bal="$v";;
+      BALANCE_NUM) balnum="$v";;
+      TOTAL) total="$v";;
+      USED) used="$v";;
+      EXPIRES) exp="$v";;
+      EXPIRES_FULL) exp_full="$v";;
+    esac
+  done <<<"$info"
+  local label_w=8
+  local value_w=60
+  # widen value column to fit longest content (no truncation)
+  local key_len=${#key}
+  local exp_str="${exp:-?}"
+  local exp_len=${#exp_str}
+  if (( key_len > value_w )); then value_w=$key_len; fi
+  if (( exp_len > value_w )); then value_w=$exp_len; fi
+
+  local usage_text
+  usage_text=$(render_usage_text "$used" "$total" "$balnum")
+  # compute bar length based on available value width and usage text length
+  local usage_text_len=$((1 + ${#usage_text})) # space + text
+  # bar includes [] (2 chars), make string fit value_w
+  local bar_len=$((value_w - usage_text_len - 2))
+  if (( bar_len < 3 )); then bar_len=3; fi
+  local bar
+  bar=$(render_bar "$balnum" "$total" "$bar_len")
+
+  local exp_display
+  if [ -n "${exp_ts:-}" ] && [[ "$exp_ts" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    local exp_seconds
+    exp_seconds=$(printf "%.0f" "$exp_ts")
+    if exp_display=$(TZ=UTC date -u -r "$((exp_seconds + 28800))" "+%Y-%m-%d %H:%M:%S GMT+08" 2>/dev/null); then
+      :
+    else
+      exp_display="${exp_full:-${exp:-?}}"
+    fi
+  else
+    exp_display="${exp_full:-${exp:-?}}"
+  fi
+
+  local border_char top_left top_right vert horiz
+  border_char="─"
+  top_left="┌"; top_right="┐"; vert="│"; horiz="─"
+  local border
+  border=$(printf "%s%s%s%s%s" \
+    "$top_left" \
+    "$(printf '%*s' $((label_w+2)) '' | tr ' ' "$horiz")" \
+    "┬" \
+    "$(printf '%*s' $((value_w+2)) '' | tr ' ' "$horiz")" \
+    "$top_right")
+
+  printf "%s\n" "$border"
+  printf "│ %-*s │ %-*s │\n" "$label_w" "No"    "$value_w" "$cur"
+  printf "│ %-*s │ %-*s │\n" "$label_w" "Key"   "$value_w" "$key"
+  printf "│ %-*s │ %-*s │\n" "$label_w" "Usage" "$value_w" "$bar $usage_text"
+  printf "│ %-*s │ %-*s │\n" "$label_w" "Expiry" "$value_w" "$exp_display"
+  printf "└%s┴%s┘\n" \
+    "$(printf '%*s' $((label_w+2)) '' | tr ' ' "$horiz")" \
+    "$(printf '%*s' $((value_w+2)) '' | tr ' ' "$horiz")"
+
+  echo
+  local export_line="export FACTORY_API_KEY=${key}"
+  echo "${export_line}"
+  if copy_to_clipboard "$export_line"; then
+    echo "Copied to clipboard."
+  else
+    echo "未找到可用的剪贴板命令，未复制，请手动复制。"
+  fi
+}
+
+cmd_use() {
+  ensure_store
+  load_keys
+  if [ $# -eq 0 ]; then
+    local n=${#KEYS[@]}
+    [ $n -gt 0 ] || die "暂无key"
+    local cur; cur=$(current_index)
+    local cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+    local keyw=20 progw=34 min_key=14 min_prog=26 expw=12
+    local padding=10 # brackets/spacing buffer
+    local need=$((keyw+progw+expw+padding))
+    if (( cols < need )); then
+      local extra=$((need - cols))
+      local cut=$((keyw - min_key))
+      if (( cut>0 )); then
+        if (( extra <= cut )); then keyw=$((keyw-extra)); extra=0; else keyw=$min_key; extra=$((extra-cut)); fi
+      fi
+      if (( extra>0 )); then
+        cut=$((progw - min_prog))
+        if (( cut>0 )); then
+          if (( extra <= cut )); then progw=$((progw-extra)); else progw=$min_prog; fi
+        fi
+      fi
+    fi
+
+    local -a opts=()
+    local -a USAGE_TXT BALNUM_ARR TOTAL_ARR REMAIN_ARR EXP_ARR KEY_DISP_ARR
+    local i=0 max_usage_len=0
+
+    # 第一次遍历：收集数据并求最大用量文本长度
+    for line in "${KEYS[@]}"; do
+      ((++i))
+      IFS=$'\t' read -r key label <<<"$line"
+      info=$(fetch_usage "$key")
+      local balnum total used exp
+      while IFS='=' read -r k v; do
+        case "$k" in
+          BALANCE_NUM) balnum="$v";;
+          TOTAL) total="$v";;
+          USED) used="$v";;
+          EXPIRES) exp="$v";;
+        esac
+      done <<<"$info"
+
+      local remain display_usage key_disp exp_display
+      remain=$(calc_remain "$balnum" "$total" "$used")
+      display_usage=$(render_usage_text "$used" "$total" "$balnum")
+      (( ${#display_usage} > max_usage_len )) && max_usage_len=${#display_usage}
+
+      key_disp=$(mask_key "$key")
+      key_disp=$(clip_pad "$key_disp" "$keyw")
+      exp_display="${exp:-?}"; [ "${exp_display,,}" = "null" ] && exp_display="?"
+
+      USAGE_TXT+=("$display_usage")
+      BALNUM_ARR+=("$balnum")
+      TOTAL_ARR+=("$total")
+      REMAIN_ARR+=("$remain")
+      EXP_ARR+=("$exp_display")
+      KEY_DISP_ARR+=("$key_disp")
+    done
+
+    # 统一进度条长度，保证用量数字列对齐
+    local bar_len=$(( progw - max_usage_len - 3 ))
+    (( bar_len < 1 )) && bar_len=1
+
+    # 第二次遍历：渲染选项
+    for ((idx=0; idx<${#KEYS[@]}; idx++)); do
+      local bar display_usage remain total balnum usage_disp exp_disp key_cell
+      display_usage="${USAGE_TXT[$idx]}"
+      balnum="${BALNUM_ARR[$idx]}"
+      total="${TOTAL_ARR[$idx]}"
+      remain="${REMAIN_ARR[$idx]}"
+      bar=$(render_bar "$balnum" "$total" "$bar_len")
+      if is_low_remain "$remain" "$total"; then
+        bar=$(color_red "$bar")
+        display_usage=$(color_red "$display_usage")
+      fi
+
+      usage_disp=$(pad_cell "${bar} ${display_usage}" "$progw")
+      exp_disp=$(pad_cell "${EXP_ARR[$idx]}" "$expw")
+      key_cell=$(clip_pad "${KEY_DISP_ARR[$idx]}" "$keyw")
+      opts+=("[$((idx+1))] ${key_cell} ${usage_disp} ${exp_disp}")
+    done
+
+    local sel
+    local ps_rc=0
+    if sel=$(prompt_select "Select a key (↑/↓, j/k, digits, Enter, q=cancel)" "${opts[@]}"); then
+      local new_idx=$((sel+1))
+      set_current "$new_idx"
+      echo "已切换到序号 $new_idx ($(mask_key "$(echo "${KEYS[$((new_idx-1))]}" | cut -f1)") )"
+      return
+    else
+      ps_rc=$?
+    fi
+    if [ "$ps_rc" -eq 1 ]; then
+      die "已取消"
+    fi
+    if [ "$ps_rc" -eq 2 ]; then
+      echo "无TTY交互，使用序号输入。"
+      local choice
+      printf "输入序号(1-%d): " "$n" >&2
+      IFS= read -r choice || die "已取消"
+      [[ "$choice" =~ ^[0-9]+$ ]] || die "序号必须是数字"
+      (( choice>=1 && choice<=n )) || die "序号超出范围"
+      set_current "$choice"
+      echo "已切换到序号 $choice ($(mask_key "$(echo "${KEYS[$((choice-1))]}" | cut -f1)") )"
+      return
+    fi
+  fi
+
+  [ $# -eq 1 ] || die "用法: dk use <序号>"
+  local idx="$1"
+  [[ "$idx" =~ ^[0-9]+$ ]] || die "序号必须是数字"
+  (( idx>=1 && idx<=${#KEYS[@]} )) || die "序号超出范围"
+  set_current "$idx"
+  echo "已切换到序号 $idx ($(mask_key "$(echo "${KEYS[$((idx-1))]}" | cut -f1)") )"
+}
+
+cmd_rotate() {
+  ensure_store
+  load_keys
+  [ ${#KEYS[@]} -gt 0 ] || die "暂无key"
+  local cur=$(current_index)
+  (( cur <= ${#KEYS[@]} )) || cur=1
+  local start=$cur
+  local tried=0
+  while :; do
+    IFS=$'\t' read -r key label <<<"${KEYS[$((cur-1))]}"
+    info=$(fetch_usage "$key")
+    local balnum bal
+    while IFS='=' read -r k v; do
+      case "$k" in
+        BALANCE_NUM) balnum="$v";;
+        BALANCE) bal="$v";;
+      esac
+    done <<<"$info"
+    if [ -z "$balnum" ] || [ "$balnum" = "None" ]; then
+      echo "序号 $cur 余额未知，默认可用。保持当前。"
+      set_current "$cur"
+      return
+    fi
+    if (( $(printf "%.0f" "$balnum") > 0 )); then
+      echo "序号 $cur 余额 > 0，保持当前。余额: $bal"
+      set_current "$cur"
+      return
+    fi
+    echo "序号 $cur 余额为0，尝试下一个。"
+    cur=$((cur % ${#KEYS[@]} + 1))
+    (( tried+=1 ))
+    if (( tried >= ${#KEYS[@]} )); then
+      die "所有key余额都为0，请添加新key。"
+    fi
+  done
+}
+
+cmd_run() {
+  ensure_store
+  auto_rotate_if_needed
+  load_keys
+  [ ${#KEYS[@]} -gt 0 ] || die "暂无key"
+  [ $# -ge 1 ] || die "用法: dk run <命令...>"
+  local idx=$(current_index)
+  (( idx <= ${#KEYS[@]} )) || idx=1
+  IFS=$'\t' read -r key _ <<<"${KEYS[$((idx-1))]}"
+  FACTORY_API_KEY="$key" "$@"
+}
+
+cmd_rm() {
+  ensure_store
+  load_keys
+  [ $# -ge 1 ] || die "用法: dk rm <序号...>"
+  local to_remove=("$@")
+  local new=()
+  local i=0
+  for line in "${KEYS[@]}"; do
+    ((++i))
+    skip=0
+    for r in "${to_remove[@]}"; do
+      if [[ "$r" == "$i" ]]; then skip=1; break; fi
+    done
+    (( skip )) || new+=("$line")
+  done
+  KEYS=("${new[@]}")
+  save_keys
+  echo "已删除，剩余 ${#KEYS[@]} 个key。"
+  set_current 1
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    add) cmd_add "$@";;
+    list|ls) cmd_list "$@";;
+    current) cmd_current "$@";;
+    use) cmd_use "$@";;
+    rotate) cmd_rotate "$@";;
+    run) cmd_run "$@";;
+    rm|remove|del) cmd_rm "$@";;
+    help|-h|--help) usage;;
+    *) die "未知命令: $cmd";;
+  esac
+}
+
+main "$@"
