@@ -1,4 +1,4 @@
-# dk
+# oroio
 
 **轻量级 CLI，用于管理 Factory Droid API 密钥，支持自动轮换。**
 

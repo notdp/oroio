@@ -1,4 +1,4 @@
-# dk
+# oroio
 
 **Lightweight CLI for managing Factory Droid API keys with auto-rotation.**
 
