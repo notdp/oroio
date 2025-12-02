@@ -1077,13 +1077,27 @@ cmd_serve() {
         old_pid=$(cat "$pid_file")
         if kill -0 "$old_pid" 2>/dev/null; then
           echo "服务已在运行 (PID: $old_pid)"
-          echo "访问: http://localhost:$port"
+          printf '\033[36m访问: http://localhost:%s\033[0m\n' "$port"
           return 0
         fi
         rm -f "$pid_file"
       fi
 
       command -v python3 >/dev/null 2>&1 || die "缺少 python3"
+
+      # Check if port is already in use
+      if command -v lsof >/dev/null 2>&1; then
+        local port_proc
+        # lsof 空闲时返回码为 1，避免 set -e 提前退出
+        port_proc=$(lsof -i :"$port" -t 2>/dev/null | head -1 || true)
+        if [ -n "$port_proc" ]; then
+          local proc_name
+          proc_name=$(ps -p "$port_proc" -o comm= 2>/dev/null || echo "unknown")
+          echo "端口 $port 已被占用 (PID: $port_proc, 进程: $proc_name)"
+          echo "运行 'kill $port_proc' 或 'dk serve stop' 后重试"
+          return 1
+        fi
+      fi
 
       local script_dir
       script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1098,7 +1112,7 @@ cmd_serve() {
 
       if kill -0 "$pid" 2>/dev/null; then
         echo "Web服务已启动 (PID: $pid)"
-        echo "访问: http://localhost:$port"
+        printf '\033[36m访问: http://localhost:%s\033[0m\n' "$port"
       else
         rm -f "$pid_file"
         die "启动失败，请检查日志: $log_file"
@@ -1128,7 +1142,7 @@ cmd_serve() {
         pid=$(cat "$pid_file")
         if kill -0 "$pid" 2>/dev/null; then
           echo "服务运行中 (PID: $pid)"
-          echo "访问: http://localhost:$port"
+          printf '\033[36m访问: http://localhost:%s\033[0m\n' "$port"
           return 0
         fi
       fi
