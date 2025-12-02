@@ -12,7 +12,7 @@
   curl -fsSL https://raw.githubusercontent.com/notdp/oroio/main/install.sh | bash
   ```
 
-- 安装脚本只安装 `dk`。`dk reinstall` 每次都会从 GitHub 下载最新 `reinstall.sh` 执行，不会额外向 PATH 写入其他脚本。
+- 安装脚本会安装 `dk` 并在 shell rc 文件中添加 `alias droid='dk run droid'`，重新打开终端后可直接运行 `droid`。
 
 - 重装（先卸载再覆盖）：
 
@@ -41,8 +41,8 @@ dk list
 # 3) 查看当前 key（会同时输出 export 行并尝试复制到剪贴板）
 dk current
 
-# 4) 使用当前 key 运行droid（若余额为 0 将自动轮换）
-dk run droid
+# 4) 直接运行 droid（安装时已配置 alias，自动注入 key 并支持轮换）
+droid
 ```
 
 ## 命令

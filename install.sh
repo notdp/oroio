@@ -55,6 +55,31 @@ locate_sources() {
   fetch_component "dk" "https://raw.githubusercontent.com/notdp/oroio/main/bin/dk" DK_SRC
 }
 
+ALIAS_LINE="alias droid='dk run droid'"
+ALIAS_MARKER="# dk-alias"
+
+detect_shell_rc() {
+  local shell_name
+  shell_name=$(basename "${SHELL:-/bin/bash}")
+  case "$shell_name" in
+    zsh)  echo "$HOME/.zshrc" ;;
+    bash) echo "$HOME/.bashrc" ;;
+    *)    echo "$HOME/.bashrc" ;;
+  esac
+}
+
+install_alias() {
+  local rc_file="$1"
+  if [ ! -f "$rc_file" ]; then
+    touch "$rc_file"
+  fi
+  if grep -qF "$ALIAS_MARKER" "$rc_file" 2>/dev/null; then
+    return 1
+  fi
+  printf '\n%s  %s\n' "$ALIAS_LINE" "$ALIAS_MARKER" >> "$rc_file"
+  return 0
+}
+
 main() {
   local prefix="${DK_PREFIX:-$HOME/.local/bin}"
   local reinstall=0
@@ -92,6 +117,13 @@ main() {
 
   install -m 0755 "$DK_SRC" "$prefix/dk"
 
+  local rc_file
+  rc_file=$(detect_shell_rc)
+  local alias_added=0
+  if install_alias "$rc_file"; then
+    alias_added=1
+  fi
+
   printf '\n安装完成:\n'
   printf '  - 已将 dk 安装到 %s/dk\n' "$prefix"
   if ! path_has "$prefix"; then
@@ -100,6 +132,12 @@ main() {
     printf '  - PATH 已包含 %s，可直接运行 dk。\n' "$prefix"
   fi
   printf '  - 数据目录为 %s（首次运行时自动创建）。\n' "$HOME/.oroio"
+
+  if [ "$alias_added" -eq 1 ]; then
+    printf '  - 已在 %s 添加 alias，重新打开终端后可直接运行 droid。\n' "$rc_file"
+  else
+    printf '  - alias 已存在于 %s，跳过。\n' "$rc_file"
+  fi
 
   if [ "$reinstall" -eq 1 ]; then
     printf '  - 已覆盖旧版本 (--reinstall)。\n'

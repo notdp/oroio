@@ -21,6 +21,33 @@ die() {
   exit 1
 }
 
+ALIAS_MARKER="# dk-alias"
+
+detect_shell_rc() {
+  local shell_name
+  shell_name=$(basename "${SHELL:-/bin/bash}")
+  case "$shell_name" in
+    zsh)  echo "$HOME/.zshrc" ;;
+    bash) echo "$HOME/.bashrc" ;;
+    *)    echo "$HOME/.bashrc" ;;
+  esac
+}
+
+remove_alias() {
+  local rc_file="$1"
+  if [ ! -f "$rc_file" ]; then
+    return 1
+  fi
+  if ! grep -qF "$ALIAS_MARKER" "$rc_file" 2>/dev/null; then
+    return 1
+  fi
+  local tmp_file
+  tmp_file=$(mktemp)
+  grep -vF "$ALIAS_MARKER" "$rc_file" > "$tmp_file"
+  mv "$tmp_file" "$rc_file"
+  return 0
+}
+
 main() {
   local prefix="${DK_PREFIX:-$HOME/.local/bin}"
   local -a summary=()
@@ -57,6 +84,13 @@ main() {
     summary+=("未在 $prefix 找到 dk (跳过)")
   fi
 
+  local rc_file
+  rc_file=$(detect_shell_rc)
+  if remove_alias "$rc_file"; then
+    summary+=("已从 $rc_file 移除 droid alias")
+  else
+    summary+=("未在 $rc_file 找到 droid alias (跳过)")
+  fi
 
   printf '\n卸载结果:\n'
   local i
