@@ -77,7 +77,9 @@ A standalone desktop app is available for macOS, Windows, and Linux. It provides
 
 Download from [Releases](https://github.com/notdp/oroio/releases/tag/electron-dist).
 
-> Note: The desktop app requires the `dk` CLI to be installed first.
+> **macOS**: After installing, run `xattr -cr /Applications/oroio.app` to bypass Gatekeeper (app is unsigned).
+>
+> **Note**: The desktop app requires the `dk` CLI to be installed first.
 
 ## Installation Details
 

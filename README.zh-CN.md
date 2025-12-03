@@ -77,7 +77,9 @@ dk serve status # 检查运行状态
 
 从 [Releases](https://github.com/notdp/oroio/releases/tag/electron-dist) 下载。
 
-> 注意：桌面应用需要先安装 `dk` CLI。
+> **macOS**：安装后运行 `xattr -cr /Applications/oroio.app` 以绕过 Gatekeeper（应用未签名）。
+>
+> **注意**：桌面应用需要先安装 `dk` CLI。
 
 ## 安装详情
 
