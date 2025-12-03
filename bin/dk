@@ -154,7 +154,12 @@ cache_save_infos() {
 }
 
 load_keys() {
-  mapfile -t KEYS < <(openssl enc -d -aes-256-cbc -pbkdf2 \
+  KEYS=()
+  # 兼容 Bash 3.2：不用 mapfile，改用传统 read 循环
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    KEYS+=("$line")
+  done < <(openssl enc -d -aes-256-cbc -pbkdf2 \
     -in "$KEYS_ENC_FILE" -pass "pass:$DKM_SALT" 2>/dev/null | grep -v '^[[:space:]]*$' || true)
 }
 
@@ -674,7 +679,10 @@ cmd_list() {
       row_key="${marker}${key_disp}"
     fi
 
-    row_exp="${exp:-?}"; [ "${row_exp,,}" = "null" ] && row_exp="?"
+    row_exp="${exp:-?}"
+    case "$row_exp" in
+      [Nn][Uu][Ll][Ll]) row_exp="?" ;;
+    esac
 
     ROW_NO+=("$i")
     ROW_KEY+=("$row_key")
@@ -928,7 +936,10 @@ cmd_use() {
       fi
 
       key_disp=$(clip_pad "$key_disp" "$keyw")
-      exp_display="${exp:-?}"; [ "${exp_display,,}" = "null" ] && exp_display="?"
+      exp_display="${exp:-?}"
+      case "$exp_display" in
+        [Nn][Uu][Ll][Ll]) exp_display="?" ;;
+      esac
 
       USAGE_TXT+=("$display_usage")
       BALNUM_ARR+=("$balnum")

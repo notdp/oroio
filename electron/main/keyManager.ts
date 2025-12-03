@@ -1,11 +1,11 @@
-import { execFile } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 
-const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 
 const OROIO_DIR = path.join(os.homedir(), '.oroio');
 const KEYS_FILE = path.join(OROIO_DIR, 'keys.enc');
@@ -152,7 +152,7 @@ export async function getCurrentKey(): Promise<KeyInfo | null> {
 
 export async function addKey(key: string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(DK_PATH, ['add', key], { timeout: 10000 });
+    const { stdout, stderr } = await execAsync(`"${DK_PATH}" add "${key}"`, { timeout: 10000 });
     if (stderr) {
       return { success: false, error: stderr.trim() };
     }
@@ -165,7 +165,7 @@ export async function addKey(key: string): Promise<{ success: boolean; message?:
 
 export async function removeKey(index: number): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(DK_PATH, ['rm', String(index)], { timeout: 10000 });
+    const { stdout, stderr } = await execAsync(`"${DK_PATH}" rm ${index}`, { timeout: 10000 });
     if (stderr) {
       return { success: false, error: stderr.trim() };
     }
@@ -177,7 +177,7 @@ export async function removeKey(index: number): Promise<{ success: boolean; mess
 
 export async function useKey(index: number): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(DK_PATH, ['use', String(index)], { timeout: 10000 });
+    const { stdout, stderr } = await execAsync(`"${DK_PATH}" use ${index}`, { timeout: 10000 });
     if (stderr) {
       return { success: false, error: stderr.trim() };
     }
@@ -189,7 +189,7 @@ export async function useKey(index: number): Promise<{ success: boolean; message
 
 export async function refreshCache(): Promise<{ success: boolean; error?: string }> {
   try {
-    await execFileAsync(DK_PATH, ['list'], { timeout: 30000 });
+    await execAsync(`"${DK_PATH}" list`, { timeout: 30000 });
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to refresh' };
