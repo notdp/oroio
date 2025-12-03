@@ -98,8 +98,10 @@ jobs:
           body: |
             Pre-built desktop application for macOS, Windows, and Linux.
             
-            **macOS**: Download `.dmg` (arm64 for Apple Silicon, x64 for Intel)
+            **macOS**: Download `.dmg` (recommended) or `.zip` (extract and run directly)
+            
             **Windows**: Download `.exe` installer
-            **Linux**: Download `.AppImage` or `.deb`
+            
+            **Linux**: Download `.AppImage`
           files: artifacts/*
           fail_on_unmatched_files: false

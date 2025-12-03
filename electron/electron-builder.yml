@@ -53,6 +53,7 @@ win:
     - nsis
     - portable
   icon: ../assets/icon.ico
+  artifactName: ${productName}-${version}-${arch}.${ext}
 
 nsis:
   oneClick: false
