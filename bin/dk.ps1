@@ -36,6 +36,8 @@ Commands:
   use [index]            switch key (interactive if no index)
   run <cmd...>           run with key (auto-rotate on zero balance)
   rm <index...>          remove keys
+  reinstall              update to latest version
+  uninstall              remove dk
   help                   show this help
 "@
 }
@@ -533,6 +535,18 @@ function Cmd-Remove {
     Write-Host "已删除，剩余 $($newKeys.Length) 个key。"
 }
 
+function Cmd-Reinstall {
+    Write-Host "正在重新安装 dk..."
+    $ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Invoke-Expression (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/notdp/oroio/main/install.ps1?ts=$ts" -UseBasicParsing).Content
+}
+
+function Cmd-Uninstall {
+    Write-Host "正在卸载 dk..."
+    $ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Invoke-Expression (Invoke-WebRequest -Uri "https://raw.githubusercontent.com/notdp/oroio/main/uninstall.ps1?ts=$ts" -UseBasicParsing).Content
+}
+
 # Main entry
 switch ($Command) {
     "add" { Cmd-Add -AddArgs $Arguments }
@@ -544,6 +558,8 @@ switch ($Command) {
     "rm" { Cmd-Remove -RmArgs $Arguments }
     "remove" { Cmd-Remove -RmArgs $Arguments }
     "del" { Cmd-Remove -RmArgs $Arguments }
+    "reinstall" { Cmd-Reinstall }
+    "uninstall" { Cmd-Uninstall }
     "help" { Show-Usage }
     "-h" { Show-Usage }
     "--help" { Show-Usage }

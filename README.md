@@ -108,21 +108,25 @@ Download from [Releases](https://github.com/notdp/oroio/releases/tag/electron-di
 ### Updating
 
 ```bash
-dk reinstall    # macOS/Linux
+dk reinstall
 ```
 
-```powershell
-irm https://raw.githubusercontent.com/notdp/oroio/main/install.ps1 | iex  # Windows
+Or manually:
+```bash
+curl -fsSL https://raw.githubusercontent.com/notdp/oroio/main/reinstall.sh | bash    # macOS/Linux
+irm https://raw.githubusercontent.com/notdp/oroio/main/reinstall.ps1 | iex           # Windows
 ```
 
 ### Uninstalling
 
 ```bash
-dk uninstall    # macOS/Linux
+dk uninstall
 ```
 
-```powershell
-irm https://raw.githubusercontent.com/notdp/oroio/main/uninstall.ps1 | iex  # Windows
+Or manually:
+```bash
+curl -fsSL https://raw.githubusercontent.com/notdp/oroio/main/uninstall.sh | bash    # macOS/Linux
+irm https://raw.githubusercontent.com/notdp/oroio/main/uninstall.ps1 | iex           # Windows
 ```
 
 ---
