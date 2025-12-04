@@ -22,6 +22,9 @@ $script:OROIO_DIR = Join-Path $env:USERPROFILE ".oroio"
 $script:KEYS_FILE = Join-Path $script:OROIO_DIR "keys.enc"
 $script:CURRENT_FILE = Join-Path $script:OROIO_DIR "current"
 $script:CACHE_FILE = Join-Path $script:OROIO_DIR "list_cache.b64"
+$script:WEB_DIR = Join-Path $script:OROIO_DIR "web"
+$script:DK_PATH = if ($PSCommandPath) { $PSCommandPath } elseif ($MyInvocation.MyCommand.Path) { $MyInvocation.MyCommand.Path } else { $null }
+$script:DK_DIR = if ($script:DK_PATH) { Split-Path $script:DK_PATH -Parent } else { $null }
 $script:SALT = "oroio"
 $script:CACHE_TTL = 30
 $script:CURL_TIMEOUT = 4
@@ -34,6 +37,7 @@ Commands:
   list                   list keys with balance/expiry
   current                show current key + export + clipboard
   use [index]            switch key (interactive if no index)
+  serve [start|stop|status]  web dashboard (default: start, port 7758)
   run <cmd...>           run with key (auto-rotate on zero balance)
   rm <index...>          remove keys
   reinstall              update to latest version
@@ -167,6 +171,61 @@ function Save-Keys {
     $encrypted = Encrypt-Keys -Keys $Keys
     [System.IO.File]::WriteAllBytes($script:KEYS_FILE, $encrypted)
     Invalidate-Cache
+}
+
+function Get-Python {
+    foreach ($name in @("python3", "python")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Path }
+    }
+    Write-ErrorExit "未找到 python3，请先安装 https://www.python.org/downloads/"
+}
+
+function Get-PortProcess {
+    param([int]$Port)
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction Stop | Select-Object -First 1
+        if ($conn) { return $conn.OwningProcess }
+    } catch { }
+    try {
+        $line = netstat -ano -p tcp | Select-String "LISTENING" | Where-Object { $_ -match "[:.]$Port\s" } | Select-Object -First 1
+        if ($line) {
+            $parts = ($line.ToString().Trim() -split "\s+")
+            if ($parts.Length -gt 0) { return [int]$parts[-1] }
+        }
+    } catch { }
+    return $null
+}
+
+function Ensure-WebAssets {
+    param([string]$WebDir)
+    
+    $indexPath = Join-Path $WebDir "index.html"
+    if (Test-Path $indexPath) { return }
+    
+    Write-Host "正在下载 web 控制台静态文件..."
+    $base = "https://github.com/notdp/oroio/releases/download/web-dist"
+    $ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $tmp = Join-Path $env:TEMP "oroio-web-$ts"
+    try {
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        $assetsDir = Join-Path $tmp "assets"
+        New-Item -ItemType Directory -Path $assetsDir -Force | Out-Null
+        
+        Invoke-WebRequest -Uri "$base/index.html?ts=$ts" -OutFile (Join-Path $tmp "index.html") -UseBasicParsing
+        Invoke-WebRequest -Uri "$base/index.js?ts=$ts" -OutFile (Join-Path $assetsDir "index.js") -UseBasicParsing
+        Invoke-WebRequest -Uri "$base/index.css?ts=$ts" -OutFile (Join-Path $assetsDir "index.css") -UseBasicParsing
+        
+        if (-not (Test-Path $WebDir)) { New-Item -ItemType Directory -Path $WebDir -Force | Out-Null }
+        Copy-Item -Path (Join-Path $tmp "*") -Destination $WebDir -Recurse -Force
+        Write-Host "web 静态资源已就绪。"
+    }
+    catch {
+        Write-ErrorExit "下载 web 资源失败: $($_.Exception.Message)"
+    }
+    finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-CurrentIndex {
@@ -535,6 +594,83 @@ function Cmd-Remove {
     Write-Host "已删除，剩余 $($newKeys.Length) 个key。"
 }
 
+function Cmd-Serve {
+    param([string[]]$ServeArgs)
+    
+    $subcmd = if ($ServeArgs.Length -gt 0) { $ServeArgs[0] } else { "start" }
+    $port = if ($env:DKM_SERVE_PORT) { [int]$env:DKM_SERVE_PORT } else { 7758 }
+    $webDir = $script:WEB_DIR
+    $pidFile = Join-Path $script:OROIO_DIR "serve.pid"
+    $logFile = Join-Path $script:OROIO_DIR "serve.log"
+    
+    $dkPath = $script:DK_PATH
+    if (-not $dkPath) { $dkPath = $MyInvocation.MyCommand.Path }
+    if (-not $dkPath) { Write-ErrorExit "无法确定 dk.ps1 路径" }
+    $dkDir = if ($script:DK_DIR) { $script:DK_DIR } else { Split-Path $dkPath -Parent }
+    $serveScript = Join-Path $dkDir "serve.py"
+    
+    switch ($subcmd) {
+        "start" {
+            if (-not (Test-Path $serveScript)) { Write-ErrorExit "未找到 serve.py ($serveScript)" }
+            Ensure-WebAssets -WebDir $webDir
+            
+            if (Test-Path $pidFile) {
+                $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+                if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+                    Write-Host "服务已在运行 (PID: $oldPid)"
+                    Write-Host ("访问: http://localhost:{0}" -f $port)
+                    return
+                }
+                Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+            }
+            
+            $portProc = Get-PortProcess -Port $port
+            if ($portProc) {
+                Write-ErrorExit "端口 $port 已被占用 (PID: $portProc)，请释放后重试或设置 DKM_SERVE_PORT"
+            }
+            
+            $python = Get-Python
+            $args = @($serveScript, "$port", $webDir, $script:OROIO_DIR, $dkPath)
+            $p = Start-Process -FilePath $python -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+            Start-Sleep -Milliseconds 300
+            if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) {
+                Set-Content -Path $pidFile -Value $p.Id -NoNewline
+                Write-Host "Web服务已启动 (PID: $($p.Id))"
+                Write-Host ("访问: http://localhost:{0}" -f $port)
+            }
+            else {
+                Write-ErrorExit "启动失败，请检查日志: $logFile"
+            }
+        }
+        "stop" {
+            if (-not (Test-Path $pidFile)) { Write-Host "服务未运行"; return }
+            $pid = Get-Content $pidFile -ErrorAction SilentlyContinue
+            if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) {
+                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                Write-Host "服务已停止 (PID: $pid)"
+            }
+            else {
+                Write-Host "服务未运行（已清理旧PID文件）"
+            }
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        }
+        "status" {
+            if (Test-Path $pidFile) {
+                $pid = Get-Content $pidFile -ErrorAction SilentlyContinue
+                if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) {
+                    Write-Host "服务运行中 (PID: $pid)"
+                    Write-Host ("访问: http://localhost:{0}" -f $port)
+                    return
+                }
+            }
+            Write-Host "服务未运行"
+        }
+        default {
+            Write-ErrorExit "用法: dk serve [start|stop|status]"
+        }
+    }
+}
+
 function Cmd-Reinstall {
     Write-Host "正在重新安装 dk..."
     $ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -555,6 +691,7 @@ switch ($Command) {
     "current" { Cmd-Current }
     "use" { Cmd-Use -UseArgs $Arguments }
     "run" { Cmd-Run -RunArgs $Arguments }
+    "serve" { Cmd-Serve -ServeArgs $Arguments }
     "rm" { Cmd-Remove -RmArgs $Arguments }
     "remove" { Cmd-Remove -RmArgs $Arguments }
     "del" { Cmd-Remove -RmArgs $Arguments }

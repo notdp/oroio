@@ -48,6 +48,28 @@ Invoke-WebRequest -Uri "$DK_URL`?ts=$ts" -OutFile $dkPath -UseBasicParsing
 $dkContent = Get-Content $dkPath -Raw -Encoding UTF8
 Set-Content -Path $dkPath -Value $dkContent -Encoding UTF8
 
+# Download serve.py (for dk serve)
+$serveUrl = "https://raw.githubusercontent.com/notdp/oroio/main/bin/serve.py"
+$servePath = Join-Path $INSTALL_DIR "serve.py"
+Invoke-WebRequest -Uri "$serveUrl`?ts=$ts" -OutFile $servePath -UseBasicParsing
+
+# Prepare web dashboard assets to $OROIO_DIR\web
+Write-Info "Preparing web dashboard assets..."
+$webDst = Join-Path $OROIO_DIR "web"
+$assetsDst = Join-Path $webDst "assets"
+if (-not (Test-Path $webDst)) { New-Item -ItemType Directory -Path $webDst -Force | Out-Null }
+if (-not (Test-Path $assetsDst)) { New-Item -ItemType Directory -Path $assetsDst -Force | Out-Null }
+
+$webBase = "https://github.com/notdp/oroio/releases/download/web-dist"
+try {
+    Invoke-WebRequest -Uri "$webBase/index.html`?ts=$ts" -OutFile (Join-Path $webDst "index.html") -UseBasicParsing
+    Invoke-WebRequest -Uri "$webBase/index.js`?ts=$ts" -OutFile (Join-Path $assetsDst "index.js") -UseBasicParsing
+    Invoke-WebRequest -Uri "$webBase/index.css`?ts=$ts" -OutFile (Join-Path $assetsDst "index.css") -UseBasicParsing
+}
+catch {
+    Write-Warn "Failed to download web assets: $($_.Exception.Message)"
+}
+
 # Add to PATH if not already
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($userPath -notlike "*$INSTALL_DIR*") {
