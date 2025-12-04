@@ -134,7 +134,16 @@ function Encrypt-Keys {
     param([string[]]$Keys)
     
     $salt = [byte[]]::new(8)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($salt)
+    $fillMethod = [System.Security.Cryptography.RandomNumberGenerator].GetMethod("Fill", [Type[]]@([byte[]]))
+    if ($fillMethod) {
+        # .NET 6+/PowerShell 7+
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($salt)
+    }
+    else {
+        # PowerShell 5.1 fallback
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($salt) } finally { $rng.Dispose() }
+    }
     
     $derived = Derive-KeyAndIV -Salt $salt
     
@@ -602,6 +611,7 @@ function Cmd-Serve {
     $webDir = $script:WEB_DIR
     $pidFile = Join-Path $script:OROIO_DIR "serve.pid"
     $logFile = Join-Path $script:OROIO_DIR "serve.log"
+    $errFile = Join-Path $script:OROIO_DIR "serve-error.log"
     
     $dkPath = $script:DK_PATH
     if (-not $dkPath) { $dkPath = $MyInvocation.MyCommand.Path }
@@ -631,7 +641,7 @@ function Cmd-Serve {
             
             $python = Get-Python
             $args = @($serveScript, "$port", $webDir, $script:OROIO_DIR, $dkPath)
-            $p = Start-Process -FilePath $python -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+            $p = Start-Process -FilePath $python -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $errFile
             Start-Sleep -Milliseconds 300
             if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) {
                 Set-Content -Path $pidFile -Value $p.Id -NoNewline
@@ -639,7 +649,7 @@ function Cmd-Serve {
                 Write-Host ("访问: http://localhost:{0}" -f $port)
             }
             else {
-                Write-ErrorExit "启动失败，请检查日志: $logFile"
+                Write-ErrorExit "启动失败，请检查日志: $logFile / $errFile"
             }
         }
         "stop" {
