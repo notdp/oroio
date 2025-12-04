@@ -658,7 +658,8 @@ function Cmd-Serve {
             
             $portProc = Get-PortProcess -Port $port
             if ($portProc) {
-                Write-ErrorExit "端口 $port 已被占用 (PID: $portProc)，请释放后重试或设置 DKM_SERVE_PORT"
+                $killHint = "Stop-Process -Id $portProc -Force"
+                Write-ErrorExit "端口 $port 已被占用 (PID: $portProc)，可执行 [$killHint] 释放后重试，或设置 DKM_SERVE_PORT 更换端口"
             }
             
             $python = Get-Python

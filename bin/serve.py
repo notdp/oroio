@@ -2,6 +2,7 @@
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,20 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         self.oroio_dir = oroio_dir
         self.dk_path = dk_path
         super().__init__(*args, **kwargs)
+
+    def _dk_cmd(self, sub_args):
+        """构造跨平台可执行的 dk 调用命令。
+
+        Windows 安装的是 dk.ps1，直接把 .ps1 当可执行文件会触发
+        "[WinError 193] %1 不是有效的 Win32 应用程序"。这里检测 .ps1
+        后用 PowerShell 解释执行；其他平台保持原行为。
+        """
+
+        if os.name == 'nt' and self.dk_path.lower().endswith('.ps1'):
+            # 优先使用 pwsh，其次退回 Windows 自带 powershell
+            shell = 'pwsh' if shutil.which('pwsh') else 'powershell'
+            return [shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', self.dk_path, *sub_args]
+        return [self.dk_path, *sub_args]
     
     def do_GET(self):
         path = unquote(self.path)
@@ -77,14 +92,14 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         if not key:
             self.send_json({'success': False, 'error': 'Key is required'})
             return
-        
+
         try:
             result = subprocess.run(
-                [self.dk_path, 'add', key],
+                self._dk_cmd(['add', key]),
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
-                subprocess.run([self.dk_path, 'list'], capture_output=True, timeout=30)
+                subprocess.run(self._dk_cmd(['list']), capture_output=True, timeout=30)
                 self.send_json({'success': True, 'message': result.stdout.strip()})
             else:
                 self.send_json({'success': False, 'error': result.stderr.strip() or result.stdout.strip()})
@@ -99,7 +114,7 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         
         try:
             result = subprocess.run(
-                [self.dk_path, 'rm', str(index)],
+                self._dk_cmd(['rm', str(index)]),
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
@@ -117,7 +132,7 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         
         try:
             result = subprocess.run(
-                [self.dk_path, 'use', str(index)],
+                self._dk_cmd(['use', str(index)]),
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
@@ -130,7 +145,7 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
     def handle_refresh(self):
         try:
             result = subprocess.run(
-                [self.dk_path, 'list'],
+                self._dk_cmd(['list']),
                 capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0:
