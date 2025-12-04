@@ -110,7 +110,15 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
-                subprocess.run(self._dk_cmd(['list']), capture_output=True, timeout=30)
+                # 刷新缓存改为异步，避免阻塞前端请求（Windows 上 dk list 可能很慢）
+                try:
+                    subprocess.Popen(
+                        self._dk_cmd(['list']),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass
                 self.send_json({'success': True, 'message': result.stdout.strip()})
             else:
                 self.send_json({'success': False, 'error': result.stderr.strip() or result.stdout.strip()})

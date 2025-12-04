@@ -28,6 +28,7 @@ $script:DK_DIR = if ($script:DK_PATH) { Split-Path $script:DK_PATH -Parent } els
 $script:SALT = "oroio"
 $script:CACHE_TTL = 30
 $script:CURL_TIMEOUT = 4
+$script:LIST_MAX_JOBS = 6
 
 function Show-Usage {
     Write-Host @"
@@ -462,6 +463,94 @@ function Cmd-Add {
     Write-Host "已添加。当前共有 $($keys.Length) 个key。"
 }
 
+function Fetch-UsageParallel {
+    param([string[]]$Keys)
+    
+    $timeout = $script:CURL_TIMEOUT
+    $maxJobs = $script:LIST_MAX_JOBS
+    if ($maxJobs -lt 1) { $maxJobs = 6 }
+    if ($Keys.Length -lt $maxJobs) { $maxJobs = $Keys.Length }
+    
+    $scriptBlock = {
+        param([string]$Key, [int]$Timeout)
+        $result = @{
+            BALANCE = 0; BALANCE_NUM = 0; TOTAL = 0; USED = 0; EXPIRES = "?"; RAW = ""
+        }
+        try {
+            $headers = @{
+                "Authorization" = "Bearer $Key"
+                "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            $response = Invoke-RestMethod -Uri "https://app.factory.ai/api/organization/members/chat-usage" `
+                -Headers $headers -Method Get -TimeoutSec $Timeout -ErrorAction Stop
+            $usage = $response.usage
+            if ($null -eq $usage) { $result.RAW = "no_usage"; return $result }
+            $section = $null
+            foreach ($s in @($usage.standard, $usage.premium, $usage.total, $usage.main)) {
+                if ($null -ne $s) { $section = $s; break }
+            }
+            if ($null -ne $section) {
+                $total = $section.totalAllowance
+                if ($null -eq $total) { $total = $section.basicAllowance }
+                if ($null -eq $total) { $total = $section.allowance }
+                $used = $section.orgTotalTokensUsed
+                if ($null -eq $used) { $used = $section.used }
+                if ($null -eq $used) { $used = $section.tokensUsed }
+                if ($null -eq $used) { $used = 0 }
+                $overage = $section.orgOverageUsed
+                if ($null -eq $overage) { $overage = 0 }
+                $used = $used + $overage
+                if ($null -ne $total) {
+                    $result.TOTAL = [long]$total
+                    $result.USED = [long]$used
+                    $result.BALANCE_NUM = [long]($total - $used)
+                    $result.BALANCE = $result.BALANCE_NUM
+                }
+            }
+            $expRaw = $usage.endDate
+            if ($null -eq $expRaw) { $expRaw = $usage.expire_at }
+            if ($null -eq $expRaw) { $expRaw = $usage.expires_at }
+            if ($null -ne $expRaw) {
+                try {
+                    if ($expRaw -match '^\d+$') {
+                        $ts = [long]$expRaw / 1000
+                        $date = [DateTimeOffset]::FromUnixTimeSeconds([long]$ts)
+                        $result.EXPIRES = $date.ToString("yyyy-MM-dd")
+                    } else { $result.EXPIRES = $expRaw.ToString() }
+                } catch { $result.EXPIRES = $expRaw.ToString() }
+            }
+        } catch {
+            $result.BALANCE = 0; $result.BALANCE_NUM = 0; $result.RAW = "http_error"; $result.EXPIRES = "Invalid key"
+        }
+        return $result
+    }
+    
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, $maxJobs)
+    $runspacePool.Open()
+    
+    $jobs = @()
+    for ($i = 0; $i -lt $Keys.Length; $i++) {
+        $ps = [powershell]::Create()
+        $ps.RunspacePool = $runspacePool
+        [void]$ps.AddScript($scriptBlock).AddArgument($Keys[$i]).AddArgument($timeout)
+        $jobs += @{ Index = $i; PS = $ps; Handle = $ps.BeginInvoke() }
+    }
+    
+    $results = @{}
+    foreach ($job in $jobs) {
+        try {
+            $results[$job.Index] = $job.PS.EndInvoke($job.Handle)
+        } catch {
+            $results[$job.Index] = @{ BALANCE = 0; BALANCE_NUM = 0; TOTAL = 0; USED = 0; EXPIRES = "?"; RAW = "error" }
+        }
+        $job.PS.Dispose()
+    }
+    $runspacePool.Close()
+    $runspacePool.Dispose()
+    
+    return $results
+}
+
 function Cmd-List {
     Ensure-Store
     $keys = @(Decrypt-Keys)
@@ -473,6 +562,9 @@ function Cmd-List {
     
     $currentIdx = Get-CurrentIndex
     
+    # 并发获取所有 key 的用量
+    $usageResults = Fetch-UsageParallel -Keys $keys
+    
     Write-Host ""
     Write-Host ("  {0,-4} {1,-16} {2,-30} {3,-12}" -f "No", "Key", "Usage", "Expiry")
     Write-Host ("  " + ("-" * 66))
@@ -480,7 +572,7 @@ function Cmd-List {
     for ($i = 0; $i -lt $keys.Length; $i++) {
         $key = $keys[$i]
         $idx = $i + 1
-        $usage = Fetch-Usage -Key $key
+        $usage = $usageResults[$i]
         
         $marker = if ($idx -eq $currentIdx) { ">" } else { " " }
         $maskedKey = Mask-Key -Key $key
