@@ -1,32 +1,130 @@
 #!/usr/bin/env python3
+import hashlib
 import http.server
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
 
+SALT = b"oroio"
+ITERATIONS = 10000
+
+def _ensure_crypto():
+    """确保加密库可用，Windows 上自动安装 pycryptodome"""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher
+        return
+    except ImportError:
+        pass
+    try:
+        from Crypto.Cipher import AES
+        return
+    except ImportError:
+        pass
+    if os.name == 'nt':
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'pycryptodome'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def derive_key_iv(salt: bytes) -> tuple:
+    """PBKDF2 派生 key 和 iv，与 dk.ps1/dk 兼容"""
+    derived = hashlib.pbkdf2_hmac('sha256', SALT, salt, ITERATIONS, dklen=48)
+    return derived[:32], derived[32:48]
+
+def decrypt_keys(keys_file: str) -> list:
+    """解密 keys.enc 文件，返回 key 列表"""
+    if not os.path.isfile(keys_file):
+        return []
+    with open(keys_file, 'rb') as f:
+        data = f.read()
+    if len(data) < 17:
+        return []
+    if data[:8] != b'Salted__':
+        return []
+    salt = data[8:16]
+    ciphertext = data[16:]
+    key, iv = derive_key_iv(salt)
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.primitives import padding
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(ciphertext) + decryptor.finalize()
+        unpadder = padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded) + unpadder.finalize()
+    except ImportError:
+        # fallback: PyCryptodome
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import unpad
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+    text = plaintext.decode('utf-8')
+    keys = []
+    for line in text.split('\n'):
+        line = line.strip()
+        if line:
+            keys.append(line.split('\t')[0])
+    return keys
+
+def encrypt_keys(keys: list, keys_file: str):
+    """加密 key 列表并写入文件"""
+    salt = secrets.token_bytes(8)
+    key, iv = derive_key_iv(salt)
+    text = '\n'.join(f"{k}\t" for k in keys)
+    plaintext = text.encode('utf-8')
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.primitives import padding
+        padder = padding.PKCS7(128).padder()
+        padded = padder.update(plaintext) + padder.finalize()
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(padded) + encryptor.finalize()
+    except ImportError:
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import pad
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        ciphertext = cipher.encrypt(pad(plaintext, AES.block_size))
+    with open(keys_file, 'wb') as f:
+        f.write(b'Salted__' + salt + ciphertext)
+
 class OroioHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, oroio_dir=None, dk_path=None, **kwargs):
         self.oroio_dir = oroio_dir
         self.dk_path = dk_path
+        self.keys_file = os.path.join(oroio_dir, 'keys.enc')
+        self.current_file = os.path.join(oroio_dir, 'current')
+        self.cache_file = os.path.join(oroio_dir, 'list_cache.b64')
         super().__init__(*args, **kwargs)
 
     def _dk_cmd(self, sub_args):
-        """构造跨平台可执行的 dk 调用命令。
-
-        Windows 安装的是 dk.ps1，直接把 .ps1 当可执行文件会触发
-        "[WinError 193] %1 不是有效的 Win32 应用程序"。这里检测 .ps1
-        后用 PowerShell 解释执行；其他平台保持原行为。
-        """
-
+        """构造跨平台可执行的 dk 调用命令（仅用于 list 刷新缓存）"""
         if os.name == 'nt' and self.dk_path.lower().endswith('.ps1'):
-            # 优先使用 pwsh，其次退回 Windows 自带 powershell
             shell = 'pwsh' if shutil.which('pwsh') else 'powershell'
             return [shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', self.dk_path, *sub_args]
         return [self.dk_path, *sub_args]
+    
+    def _invalidate_cache(self):
+        """删除缓存文件"""
+        try:
+            if os.path.exists(self.cache_file):
+                os.remove(self.cache_file)
+        except:
+            pass
+    
+    def _get_current_index(self) -> int:
+        try:
+            with open(self.current_file, 'r') as f:
+                return max(1, int(f.read().strip()))
+        except:
+            return 1
+    
+    def _set_current_index(self, idx: int):
+        with open(self.current_file, 'w') as f:
+            f.write(str(idx))
     
     def do_GET(self):
         path = unquote(self.path)
@@ -103,25 +201,12 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         if not key:
             self.send_json({'success': False, 'error': 'Key is required'})
             return
-
         try:
-            result = subprocess.run(
-                self._dk_cmd(['add', key]),
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                # 刷新缓存改为异步，避免阻塞前端请求（Windows 上 dk list 可能很慢）
-                try:
-                    subprocess.Popen(
-                        self._dk_cmd(['list']),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                except Exception:
-                    pass
-                self.send_json({'success': True, 'message': result.stdout.strip()})
-            else:
-                self.send_json({'success': False, 'error': result.stderr.strip() or result.stdout.strip()})
+            keys = decrypt_keys(self.keys_file)
+            keys.append(key)
+            encrypt_keys(keys, self.keys_file)
+            self._invalidate_cache()
+            self.send_json({'success': True, 'message': f'已添加。当前共有 {len(keys)} 个key。'})
         except Exception as e:
             self.send_json({'success': False, 'error': str(e)})
     
@@ -130,16 +215,17 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         if not index:
             self.send_json({'success': False, 'error': 'Index is required'})
             return
-        
         try:
-            result = subprocess.run(
-                self._dk_cmd(['rm', str(index)]),
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                self.send_json({'success': True, 'message': result.stdout.strip()})
-            else:
-                self.send_json({'success': False, 'error': result.stderr.strip() or result.stdout.strip()})
+            idx = int(index)
+            keys = decrypt_keys(self.keys_file)
+            if idx < 1 or idx > len(keys):
+                self.send_json({'success': False, 'error': '序号超出范围'})
+                return
+            keys.pop(idx - 1)
+            encrypt_keys(keys, self.keys_file)
+            self._set_current_index(1)
+            self._invalidate_cache()
+            self.send_json({'success': True, 'message': f'已删除，剩余 {len(keys)} 个key。'})
         except Exception as e:
             self.send_json({'success': False, 'error': str(e)})
     
@@ -148,16 +234,14 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         if not index:
             self.send_json({'success': False, 'error': 'Index is required'})
             return
-        
         try:
-            result = subprocess.run(
-                self._dk_cmd(['use', str(index)]),
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                self.send_json({'success': True, 'message': result.stdout.strip()})
-            else:
-                self.send_json({'success': False, 'error': result.stderr.strip() or result.stdout.strip()})
+            idx = int(index)
+            keys = decrypt_keys(self.keys_file)
+            if idx < 1 or idx > len(keys):
+                self.send_json({'success': False, 'error': '序号超出范围'})
+                return
+            self._set_current_index(idx)
+            self.send_json({'success': True, 'message': f'已切换到序号 {idx}'})
         except Exception as e:
             self.send_json({'success': False, 'error': str(e)})
     
@@ -186,6 +270,7 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 def run(port, web_dir, oroio_dir, dk_path):
+    _ensure_crypto()
     os.chdir(web_dir)
     
     handler = lambda *args, **kwargs: OroioHandler(
