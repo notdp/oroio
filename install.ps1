@@ -91,7 +91,7 @@ Write-Host "  dk.ps1 installed to: $dkPath"
 Write-Host "  Data directory: $OROIO_DIR"
 Write-Host ""
 Write-Host "To use in current session, run:" -ForegroundColor Yellow
-Write-Host "  . `$PROFILE"
+Write-Host "  . `$PROFILE.CurrentUserAllHosts"
 Write-Host ""
 Write-Host "Or restart your terminal."
 Write-Host ""
