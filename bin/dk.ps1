@@ -53,6 +53,69 @@ function Write-ErrorExit {
     exit 1
 }
 
+function Read-FileBytesSafe {
+    param(
+        [string]$Path,
+        [int]$Retries = 5,
+        [int]$DelayMs = 120
+    )
+    for ($i = 0; $i -lt $Retries; $i++) {
+        try {
+            $fs = [System.IO.FileStream]::new(
+                $Path,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::ReadWrite
+            )
+            try {
+                $buf = [byte[]]::new($fs.Length)
+                $read = $fs.Read($buf, 0, $buf.Length)
+                if ($read -lt $buf.Length) { [Array]::Resize([ref]$buf, $read) }
+                return $buf
+            }
+            finally {
+                $fs.Dispose()
+            }
+        }
+        catch {
+            if ($i -ge ($Retries - 1)) { throw }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+
+function Write-FileBytesSafe {
+    param(
+        [string]$Path,
+        [byte[]]$Bytes,
+        [int]$Retries = 5,
+        [int]$DelayMs = 120
+    )
+    for ($i = 0; $i -lt $Retries; $i++) {
+        try {
+            $dir = Split-Path $Path -Parent
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+            $fs = [System.IO.FileStream]::new(
+                $Path,
+                [System.IO.FileMode]::Create,
+                [System.IO.FileAccess]::Write,
+                [System.IO.FileShare]::None
+            )
+            try {
+                $fs.Write($Bytes, 0, $Bytes.Length)
+                return
+            }
+            finally {
+                $fs.Dispose()
+            }
+        }
+        catch {
+            if ($i -ge ($Retries - 1)) { throw }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+
 function Ensure-Store {
     if (-not (Test-Path $script:OROIO_DIR)) {
         New-Item -ItemType Directory -Path $script:OROIO_DIR -Force | Out-Null
@@ -68,17 +131,23 @@ function Ensure-Store {
                 $needInitKeys = $true
             }
             else {
-                $header = [System.IO.File]::ReadAllBytes($script:KEYS_FILE)[0..7]
-                $headerText = [System.Text.Encoding]::ASCII.GetString($header)
-                if ($headerText -ne "Salted__") {
-                    $needInitKeys = $true
+                $headerData = Read-FileBytesSafe -Path $script:KEYS_FILE
+                if ($headerData.Length -lt 8) { $needInitKeys = $true }
+                else {
+                    $headerText = [System.Text.Encoding]::ASCII.GetString($headerData[0..7])
+                    if ($headerText -ne "Salted__") { $needInitKeys = $true }
                 }
             }
         } catch { $needInitKeys = $true }
     }
     if ($needInitKeys) {
         $encryptedEmpty = Encrypt-Keys -Keys @()
-        [System.IO.File]::WriteAllBytes($script:KEYS_FILE, $encryptedEmpty)
+        try {
+            Write-FileBytesSafe -Path $script:KEYS_FILE -Bytes $encryptedEmpty
+        }
+        catch {
+            Write-ErrorExit "keys.enc 被其他进程占用，无法写入。请关闭占用进程后重试。"
+        }
     }
     if (-not (Test-Path $script:CURRENT_FILE) -or (Get-Content $script:CURRENT_FILE -ErrorAction SilentlyContinue) -eq "") {
         Set-Content -Path $script:CURRENT_FILE -Value "1" -NoNewline
@@ -114,8 +183,13 @@ function Decrypt-Keys {
     if (-not (Test-Path $script:KEYS_FILE) -or (Get-Item $script:KEYS_FILE).Length -eq 0) {
         return @()
     }
-    
-    $data = [System.IO.File]::ReadAllBytes($script:KEYS_FILE)
+
+    try {
+        $data = Read-FileBytesSafe -Path $script:KEYS_FILE
+    }
+    catch {
+        Write-ErrorExit "无法读取 keys.enc，可能被其他进程占用。请关闭相关进程后重试。"
+    }
     if ($data.Length -lt 17) {
         return @()
     }
@@ -200,10 +274,15 @@ function Encrypt-Keys {
 
 function Save-Keys {
     param([string[]]$Keys)
-    
+
     Ensure-Store
     $encrypted = Encrypt-Keys -Keys $Keys
-    [System.IO.File]::WriteAllBytes($script:KEYS_FILE, $encrypted)
+    try {
+        Write-FileBytesSafe -Path $script:KEYS_FILE -Bytes $encrypted
+    }
+    catch {
+        Write-ErrorExit "写入 keys.enc 失败，文件可能被占用。请关闭其他正在使用它的程序后重试。"
+    }
     Invalidate-Cache
 }
 
@@ -682,15 +761,26 @@ function Cmd-Run {
     if ($idx -gt $keys.Length) { $idx = 1 }
     
     $key = $keys[$idx - 1]
-    
+
     $env:FACTORY_API_KEY = $key
-    
+
     $cmd = $RunArgs[0]
     $cmdArgs = @()
     if ($RunArgs.Length -gt 1) {
         $cmdArgs = $RunArgs[1..($RunArgs.Length - 1)]
     }
-    
+
+    $cmdApp = Get-Command $cmd -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmdApp) {
+        & $cmdApp.Source @cmdArgs
+        return
+    }
+
+    $cmdInfo = Get-Command $cmd -ErrorAction SilentlyContinue
+    if ($cmdInfo -and $cmdInfo.CommandType -eq "Function") {
+        Write-ErrorExit "命令 $cmd 被 PowerShell 函数遮挡，导致递归调用或无法找到真实可执行文件。请使用可执行文件路径或移除同名函数后重试。"
+    }
+
     & $cmd @cmdArgs
 }
 

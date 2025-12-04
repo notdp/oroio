@@ -84,7 +84,15 @@ $profileContent = @'
 
 # dk (droid key manager)
 function dk { & "$env:LOCALAPPDATA\oroio\bin\dk.ps1" @args }
-function droid { dk run droid @args }
+function droid {
+    $droidCmd = Get-Command droid -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $droidCmd) {
+        Write-Host "未找到 droid 可执行文件，请先安装 Factory droid CLI（仍尝试调用 droid，安装后请重开终端）。" -ForegroundColor Yellow
+        dk run droid @args
+        return
+    }
+    dk run $($droidCmd.Source) @args
+}
 # end dk
 
 '@
@@ -96,13 +104,15 @@ if (-not (Test-Path $profilePath)) {
 }
 
 $existingProfile = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
-$needsInsert = [string]::IsNullOrWhiteSpace($existingProfile) -or $existingProfile -notlike "*# dk (droid key manager)*"
-if ($needsInsert) {
-    Write-Info "Configuring PowerShell profile..."
-    Add-Content -Path $profilePath -Value $profileContent
+$blockPattern = "(?s)# dk \(droid key manager\).*?# end dk\r?\n?"
+if ($existingProfile -match $blockPattern) {
+    Write-Info "Updating existing dk profile block..."
+    $updatedProfile = [regex]::Replace($existingProfile, $blockPattern, "$profileContent`n")
+    Set-Content -Path $profilePath -Value $updatedProfile -NoNewline
 }
 else {
-    Write-Warn "Profile already configured, skipping."
+    Write-Info "Configuring PowerShell profile..."
+    Add-Content -Path $profilePath -Value $profileContent
 }
 
 # Done
