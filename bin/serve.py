@@ -5,7 +5,7 @@ import hashlib
 import http.server
 import json
 import os
-import secrets
+import platform
 import subprocess
 import sys
 import urllib.request
@@ -14,97 +14,104 @@ from urllib.parse import unquote
 
 SALT = b"oroio"
 ITERATIONS = 10000
+IS_WINDOWS = platform.system() == 'Windows'
 
-def _ensure_crypto():
-    """确保加密库可用，自动安装 pycryptodome"""
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher
-        return True
-    except ImportError:
-        pass
-    try:
-        from Crypto.Cipher import AES
-        return True
-    except ImportError:
-        pass
-    # 尝试安装 pycryptodome
-    try:
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q', 'pycryptodome'],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # 安装后清除导入缓存并重试
-        import importlib
-        if 'Crypto' in sys.modules:
-            del sys.modules['Crypto']
-        if 'Crypto.Cipher' in sys.modules:
-            del sys.modules['Crypto.Cipher']
-        if 'Crypto.Cipher.AES' in sys.modules:
-            del sys.modules['Crypto.Cipher.AES']
-        from Crypto.Cipher import AES
-        return True
-    except Exception:
-        return False
-
-def derive_key_iv(salt: bytes) -> tuple:
-    """PBKDF2 派生 key 和 iv，与 dk.ps1/dk 兼容"""
+def _derive_key_iv(salt: bytes) -> tuple:
+    """PBKDF2-SHA256 派生 key(32) 和 iv(16)"""
     derived = hashlib.pbkdf2_hmac('sha256', SALT, salt, ITERATIONS, dklen=48)
     return derived[:32], derived[32:48]
+
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
+    
+    bcrypt = ctypes.windll.bcrypt
+    BCRYPT_AES_ALGORITHM = "AES"
+    BCRYPT_CHAIN_MODE_CBC = "ChainingModeCBC"
+    BCRYPT_CHAINING_MODE = "ChainingMode"
+    
+    class AESCipher:
+        def __init__(self, key: bytes, iv: bytes):
+            self.hAlg = ctypes.c_void_p()
+            self.hKey = ctypes.c_void_p()
+            self.iv = (ctypes.c_ubyte * len(iv))(*iv)
+            bcrypt.BCryptOpenAlgorithmProvider(ctypes.byref(self.hAlg), BCRYPT_AES_ALGORITHM, None, 0)
+            mode = BCRYPT_CHAIN_MODE_CBC.encode('utf-16-le') + b'\x00\x00'
+            bcrypt.BCryptSetProperty(self.hAlg, BCRYPT_CHAINING_MODE, mode, len(mode), 0)
+            bcrypt.BCryptGenerateSymmetricKey(self.hAlg, ctypes.byref(self.hKey), None, 0, key, len(key), 0)
+        
+        def decrypt(self, ciphertext: bytes) -> bytes:
+            out_len = wintypes.ULONG()
+            iv_copy = (ctypes.c_ubyte * len(self.iv))(*self.iv)
+            bcrypt.BCryptDecrypt(self.hKey, ciphertext, len(ciphertext), None, iv_copy, len(iv_copy), None, 0, ctypes.byref(out_len), 1)
+            out_buf = (ctypes.c_ubyte * out_len.value)()
+            iv_copy = (ctypes.c_ubyte * len(self.iv))(*self.iv)
+            bcrypt.BCryptDecrypt(self.hKey, ciphertext, len(ciphertext), None, iv_copy, len(iv_copy), out_buf, out_len.value, ctypes.byref(out_len), 1)
+            return bytes(out_buf[:out_len.value])
+        
+        def encrypt(self, plaintext: bytes) -> bytes:
+            pad_len = 16 - (len(plaintext) % 16)
+            plaintext = plaintext + bytes([pad_len] * pad_len)
+            out_len = wintypes.ULONG()
+            iv_copy = (ctypes.c_ubyte * len(self.iv))(*self.iv)
+            bcrypt.BCryptEncrypt(self.hKey, plaintext, len(plaintext), None, iv_copy, len(iv_copy), None, 0, ctypes.byref(out_len), 0)
+            out_buf = (ctypes.c_ubyte * out_len.value)()
+            iv_copy = (ctypes.c_ubyte * len(self.iv))(*self.iv)
+            bcrypt.BCryptEncrypt(self.hKey, plaintext, len(plaintext), None, iv_copy, len(iv_copy), out_buf, out_len.value, ctypes.byref(out_len), 0)
+            return bytes(out_buf[:out_len.value])
+        
+        def __del__(self):
+            if self.hKey: bcrypt.BCryptDestroyKey(self.hKey)
+            if self.hAlg: bcrypt.BCryptCloseAlgorithmProvider(self.hAlg, 0)
 
 def decrypt_keys(keys_file: str) -> list:
     """解密 keys.enc 文件，返回 key 列表"""
     if not os.path.isfile(keys_file):
         return []
-    with open(keys_file, 'rb') as f:
-        data = f.read()
-    if len(data) < 17:
-        return []
-    if data[:8] != b'Salted__':
-        return []
-    salt = data[8:16]
-    ciphertext = data[16:]
-    key, iv = derive_key_iv(salt)
     try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.primitives import padding
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        padded = decryptor.update(ciphertext) + decryptor.finalize()
-        unpadder = padding.PKCS7(128).unpadder()
-        plaintext = unpadder.update(padded) + unpadder.finalize()
-    except ImportError:
-        # fallback: PyCryptodome
-        from Crypto.Cipher import AES
-        from Crypto.Util.Padding import unpad
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
-    text = plaintext.decode('utf-8')
-    keys = []
-    for line in text.split('\n'):
-        line = line.strip()
-        if line:
-            keys.append(line.split('\t')[0])
-    return keys
+        if IS_WINDOWS:
+            with open(keys_file, 'rb') as f:
+                data = f.read()
+            if len(data) < 17 or data[:8] != b'Salted__':
+                return []
+            salt, ciphertext = data[8:16], data[16:]
+            key, iv = _derive_key_iv(salt)
+            cipher = AESCipher(key, iv)
+            text = cipher.decrypt(ciphertext).decode('utf-8')
+        else:
+            result = subprocess.run(
+                ['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2', '-in', keys_file, '-pass', f'pass:{SALT.decode()}'],
+                capture_output=True
+            )
+            if result.returncode != 0:
+                return []
+            text = result.stdout.decode('utf-8')
+        keys = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if line:
+                keys.append(line.split('\t')[0])
+        return keys
+    except Exception:
+        return []
 
 def encrypt_keys(keys: list, keys_file: str):
     """加密 key 列表并写入文件"""
-    salt = secrets.token_bytes(8)
-    key, iv = derive_key_iv(salt)
     text = '\n'.join(f"{k}\t" for k in keys)
-    plaintext = text.encode('utf-8')
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.primitives import padding
-        padder = padding.PKCS7(128).padder()
-        padded = padder.update(plaintext) + padder.finalize()
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(padded) + encryptor.finalize()
-    except ImportError:
-        from Crypto.Cipher import AES
-        from Crypto.Util.Padding import pad
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        ciphertext = cipher.encrypt(pad(plaintext, AES.block_size))
-    with open(keys_file, 'wb') as f:
-        f.write(b'Salted__' + salt + ciphertext)
+    if IS_WINDOWS:
+        import secrets
+        salt = secrets.token_bytes(8)
+        key, iv = _derive_key_iv(salt)
+        cipher = AESCipher(key, iv)
+        ciphertext = cipher.encrypt(text.encode('utf-8'))
+        with open(keys_file, 'wb') as f:
+            f.write(b'Salted__' + salt + ciphertext)
+    else:
+        subprocess.run(
+            ['openssl', 'enc', '-aes-256-cbc', '-pbkdf2', '-salt', '-out', keys_file, '-pass', f'pass:{SALT.decode()}'],
+            input=text.encode('utf-8'),
+            check=True
+        )
 
 API_URL = 'https://app.factory.ai/api/organization/members/chat-usage'
 API_TIMEOUT = 4
@@ -619,9 +626,6 @@ class OroioHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 def run(port, web_dir, oroio_dir, dk_path):
-    if not _ensure_crypto():
-        print("错误: 无法加载加密库，请手动安装: pip install pycryptodome", file=sys.stderr)
-        sys.exit(1)
     os.chdir(web_dir)
     
     handler = lambda *args, **kwargs: OroioHandler(
