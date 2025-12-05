@@ -39,6 +39,10 @@ EOF
 
 die() { echo "错误: $*" >&2; exit 1; }
 
+check_python3() {
+  command -v python3 >/dev/null 2>&1 || die "需要 Python 3，请安装: https://www.python.org/downloads/"
+}
+
 ensure_store() {
   mkdir -p "$DKM_HOME"
   touch "$KEYS_ENC_FILE"
@@ -188,7 +192,7 @@ fetch_usage() {
   local key="$1"
   local resp http_status body
   # 将 HTTP 状态码与 body 分开，非 200 直接标记为不可用（避免继续使用无效 key）
-  if ! resp=$(curl -sS --http1.1 --retry 0 \
+  if ! resp=$(curl -sS --retry 0 \
     --connect-timeout "$DKM_CURL_CONNECT_TIMEOUT" --max-time "$DKM_CURL_MAX_TIME" \
     -w '\n%{http_code}' -X GET 'https://app.factory.ai/api/organization/members/chat-usage' \
     -H "Authorization: Bearer ${key}" \
@@ -206,36 +210,80 @@ fetch_usage() {
     return
   fi
 
-  if ! printf "%s" "$body" | jq -r '
-    def n(v): if v==null then "" else (v|tostring) end;
-    def tot(s): if s==null then null else (s.totalAllowance // s.basicAllowance // s.allowance // null) end;
-    def used(s): if s==null then null else (s.orgTotalTokensUsed // s.used // s.tokensUsed // 0) end;
-    def over(s): if s==null then null else (s.orgOverageUsed // 0) end;
-    (.usage) as $u |
-    ($u | (.endDate // .expire_at // .expires_at)) as $exp_raw |
-    ([ $u.standard, $u.premium, $u.total, $u.main ]
-      | map(select(. != null) | {total: tot(.), used: ((used(.) // 0) + (over(.) // 0))})
-      | map(select(.total != null))
-      | (.[0] // {})) as $s |
-    ($s.total) as $total |
-    ($s.used) as $used |
-    (if ($total==null or $used==null) then null else ($total - $used) end) as $remain |
-    ($exp_raw | if .==null then null else (try ((.|tonumber)/1000) catch .) end) as $exp_ts |
-    {
-      BALANCE: $remain,
-      BALANCE_NUM: $remain,
-      TOTAL: $total,
-      USED: $used,
-      EXPIRES: (if $exp_ts==null then ($exp_raw|tostring) else ( $exp_ts | strftime("%Y-%m-%d") ) end),
-      EXPIRES_FULL: (if $exp_ts==null then ($exp_raw|tostring) else ( $exp_ts | strftime("%Y-%m-%d %H:%M:%S %Z") ) end),
-      EXPIRES_TS: $exp_ts,
-      RAW: ""
-    }
-    | to_entries
-    | map("\(.key)=\(n(.value))")
-    | .[]
-  '; then
-    printf "BALANCE=0\nBALANCE_NUM=0\nTOTAL=0\nUSED=0\nEXPIRES=?\nEXPIRES_FULL=?\nEXPIRES_TS=\nRAW=jq_error\n"
+  if ! printf "%s" "$body" | python3 -c '
+import sys, json
+from datetime import datetime, timezone
+
+def n(v):
+    return "" if v is None else str(v)
+
+def tot(s):
+    if s is None:
+        return None
+    for k in ("totalAllowance", "basicAllowance", "allowance"):
+        if k in s and s[k] is not None:
+            return s[k]
+    return None
+
+def used(s):
+    if s is None:
+        return 0
+    for k in ("orgTotalTokensUsed", "used", "tokensUsed"):
+        if k in s and s[k] is not None:
+            return s[k]
+    return 0
+
+def over(s):
+    if s is None:
+        return 0
+    return s.get("orgOverageUsed") or 0
+
+try:
+    data = json.load(sys.stdin)
+    u = data.get("usage", {})
+    exp_raw = u.get("endDate") or u.get("expire_at") or u.get("expires_at")
+    section = None
+    for sec in (u.get("standard"), u.get("premium"), u.get("total"), u.get("main")):
+        if sec is not None:
+            t = tot(sec)
+            if t is not None:
+                section = {"total": t, "used": used(sec) + over(sec)}
+                break
+    total = section["total"] if section else None
+    used_val = section["used"] if section else None
+    remain = (total - used_val) if (total is not None and used_val is not None) else None
+    exp_ts = None
+    if exp_raw is not None:
+        try:
+            exp_ts = float(exp_raw) / 1000
+        except (ValueError, TypeError):
+            pass
+    if exp_ts is not None:
+        dt = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+        expires = dt.strftime("%Y-%m-%d")
+        expires_full = dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    else:
+        expires = str(exp_raw) if exp_raw else ""
+        expires_full = str(exp_raw) if exp_raw else ""
+    print(f"BALANCE={n(remain)}")
+    print(f"BALANCE_NUM={n(remain)}")
+    print(f"TOTAL={n(total)}")
+    print(f"USED={n(used_val)}")
+    print(f"EXPIRES={expires}")
+    print(f"EXPIRES_FULL={expires_full}")
+    print(f"EXPIRES_TS={n(exp_ts)}")
+    print("RAW=")
+except Exception:
+    print("BALANCE=0")
+    print("BALANCE_NUM=0")
+    print("TOTAL=0")
+    print("USED=0")
+    print("EXPIRES=?")
+    print("EXPIRES_FULL=?")
+    print("EXPIRES_TS=")
+    print("RAW=parse_error")
+'; then
+    printf "BALANCE=0\nBALANCE_NUM=0\nTOTAL=0\nUSED=0\nEXPIRES=?\nEXPIRES_FULL=?\nEXPIRES_TS=\nRAW=python_error\n"
   fi
 }
 
@@ -530,7 +578,7 @@ auto_rotate_if_needed() {
       esac
     done <<<"$info"
 
-    if [[ "$raw" == http_* || "$raw" == curl_error || "$raw" == jq_error ]]; then
+    if [[ "$raw" == http_* || "$raw" == curl_error || "$raw" == python_error || "$raw" == parse_error ]]; then
       return 1
     fi
     remain=$(calc_remain "$balnum" "$total" "$used")
@@ -876,6 +924,7 @@ cmd_use() {
   if [ $# -eq 0 ]; then
     local n=${#KEYS[@]}
     [ $n -gt 0 ] || die "暂无key"
+    check_python3
     if ! cache_load_infos; then
       fetch_all_infos
       cache_save_infos
@@ -1198,10 +1247,10 @@ main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
     add) cmd_add "$@";;
-    list|ls) cmd_list "$@";;
-    current) cmd_current "$@";;
+    list|ls) check_python3; cmd_list "$@";;
+    current) check_python3; cmd_current "$@";;
     use) cmd_use "$@";;
-    run) cmd_run "$@";;
+    run) check_python3; cmd_run "$@";;
     serve) cmd_serve "$@";;
     rm|remove|del) cmd_rm "$@";;
     uninstall) cmd_uninstall "$@";;
