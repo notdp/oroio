@@ -9,6 +9,7 @@ import platform
 import secrets
 import subprocess
 import sys
+import threading
 import urllib.request
 import urllib.error
 from urllib.parse import unquote
@@ -710,7 +711,7 @@ def run(port, web_dir, oroio_dir, dk_path, pin_hash=None):
         *args, oroio_dir=oroio_dir, dk_path=dk_path, **kwargs
     )
     
-    with http.server.HTTPServer(('0.0.0.0', port), handler) as httpd:
+    with http.server.ThreadingHTTPServer(('0.0.0.0', port), handler) as httpd:
         httpd.serve_forever()
 
 if __name__ == '__main__':
