@@ -67,9 +67,9 @@ export default function App() {
         <header className="border-b border-border pb-6 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
-              <h1 className="text-xl font-bold tracking-tight text-primary flex items-center gap-3">
-                <Terminal className="w-6 h-6" />
-                <span className="font-pixel text-2xl tracking-tighter mt-1 text-primary leading-none">OROIO</span>
+              <h1 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
+                <Terminal className="w-5 h-5" />
+                <span className="font-pixel text-lg tracking-tighter mt-1 text-primary leading-none">OROIO</span>
               </h1>
             </div>
 
