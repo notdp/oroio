@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Sparkles, Terminal, Bot, Plug, Github } from 'lucide-react';
+import { Key, Sparkles, Terminal, Bot, Plug, Github, Volume2, VolumeX } from 'lucide-react';
+import { useSound } from '@/hooks/useSound';
 import { Toaster } from 'sonner';
 import KeyList, { showDkMissingToast } from '@/components/KeyList';
 import SkillsManager from '@/components/SkillsManager';
@@ -22,6 +23,7 @@ const tabs: { id: Tab; label: string; icon: typeof Key }[] = [
 ];
 
 export default function App() {
+  const sound = useSound();
   const [activeTab, setActiveTab] = useState<Tab>('keys');
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -86,6 +88,7 @@ export default function App() {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.key === 'Tab') {
       e.preventDefault();
+      sound.click();
       setActiveTab(prev => {
         const currentIndex = tabs.findIndex(t => t.id === prev);
         const nextIndex = e.shiftKey
@@ -94,7 +97,7 @@ export default function App() {
         return tabs[nextIndex].id;
       });
     }
-  }, []);
+  }, [sound]);
 
   useEffect(() => {
     setMounted(true);
@@ -169,7 +172,7 @@ export default function App() {
 
               <div className="flex items-center border border-border select-none bg-background">
                 <button
-                  onClick={() => setTheme('light')}
+                  onClick={() => { sound.toggleSound(); setTheme('light'); }}
                   className={cn(
                     "px-3 py-1 transition-all hover:text-foreground text-[10px] tracking-wider font-medium",
                     theme === 'light'
@@ -181,7 +184,7 @@ export default function App() {
                 </button>
                 <div className="w-[1px] h-3 bg-border" />
                 <button
-                  onClick={() => setTheme('dark')}
+                  onClick={() => { sound.toggleSound(); setTheme('dark'); }}
                   className={cn(
                     "px-3 py-1 transition-all hover:text-foreground text-[10px] tracking-wider font-medium",
                     theme === 'dark'
@@ -203,6 +206,15 @@ export default function App() {
                 <Github className="w-3 h-3" />
                 <span>GITHUB</span>
               </a>
+
+              <button
+                onClick={() => sound.toggle()}
+                className="flex items-center gap-2 px-3 py-1 border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-[10px] tracking-wider font-medium"
+                title={sound.muted ? "Unmute sounds" : "Mute sounds"}
+              >
+                {sound.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+                <span>{sound.muted ? 'MUTED' : 'SOUND'}</span>
+              </button>
             </div>
           </div>
         </header>
@@ -216,7 +228,7 @@ export default function App() {
               return (
                 <button
                   key={id}
-                  onClick={() => setActiveTab(id)}
+                  onClick={() => { sound.click(); setActiveTab(id); }}
                   className={cn(
                     "group relative px-2 py-1 transition-all duration-200 outline-none focus:ring-1 focus:ring-primary",
                     isActive

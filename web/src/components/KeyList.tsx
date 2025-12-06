@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Trash2, Plus, RefreshCw, Terminal, CheckCircle2, Copy, Circle, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { sounds } from '@/lib/sound';
 import { decryptKeys, maskKey } from '@/utils/crypto';
 import { fetchEncryptedKeys, fetchCurrentIndex, fetchCache, addKey, removeKey, useKey, refreshCache, isElectron, checkDk } from '@/utils/api';
 import type { KeyInfo, KeyUsage } from '@/utils/api';
@@ -102,6 +103,7 @@ function IconCopyButton({ text, icon: Icon, title, className }: { text: string; 
 }
 
 export function showDkMissingToast(installCmd: string) {
+  sounds.notify();
   const renderId = Date.now();
   toast.custom((t) => (
     <div className="flex flex-col w-[320px] bg-card border border-border shadow-xl relative overflow-hidden">
@@ -131,6 +133,7 @@ export function showDkMissingToast(installCmd: string) {
       <div className="px-3 pb-3">
         <button
           onClick={() => {
+            sounds.click();
             navigator.clipboard.writeText(installCmd);
             toast.dismiss(t);
           }}
@@ -259,6 +262,7 @@ export default function KeyList() {
   const handleUseKey = async (index: number) => {
     const result = await useKey(index);
     if (result.success) {
+      sounds.switch();
       await loadData(true);
       // Check if dk is installed (Electron only)
       const dkResult = await checkDk();
