@@ -9,16 +9,12 @@ DKM_CACHE_FILE="$DKM_HOME/list_cache.b64"
 DKM_SALT="oroio"
 
 # 可调优的 curl 限制，避免长时间等待慢/无效请求
-DKM_CURL_MAX_TIME="${DKM_CURL_MAX_TIME:-4}"        # 单请求超时（秒）
-DKM_CURL_CONNECT_TIMEOUT="${DKM_CURL_CONNECT_TIMEOUT:-2}" # 连接超时（秒）
+DKM_CURL_MAX_TIME="${DKM_CURL_MAX_TIME:-60}"        # 单请求超时（秒）
+DKM_CURL_CONNECT_TIMEOUT="${DKM_CURL_CONNECT_TIMEOUT:-60}" # 连接超时（秒）
 # 并发与缓存
 DKM_LIST_AUTO_MAX="${DKM_LIST_AUTO_MAX:-6}"        # 自动模式的最大并发上限
 DKM_LIST_JOBS="${DKM_LIST_JOBS:-0}"                # 0 表示自动 min(DKM_LIST_AUTO_MAX, key数)
-DKM_CACHE_TTL="${DKM_CACHE_TTL:-30}"                # list 结果缓存 TTL（秒，0 关闭）
-
-# 可调优的 curl 限制，避免长时间等待慢/无效请求
-DKM_CURL_MAX_TIME="${DKM_CURL_MAX_TIME:-4}"        # 单请求超时（秒）
-DKM_CURL_CONNECT_TIMEOUT="${DKM_CURL_CONNECT_TIMEOUT:-2}" # 连接超时（秒）
+DKM_CACHE_TTL="${DKM_CACHE_TTL:-60}"                # list 结果缓存 TTL（秒，0 关闭）
 
 usage() {
   cat <<'EOF'
