@@ -93,39 +93,30 @@ export default function DroidsManager() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2 md:gap-4">
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Total Droids</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              {droids.length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">BOTS</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Total</span>
+            <span className="text-sm font-bold font-mono text-primary">{droids.length.toString().padStart(2, '0')}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Status</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              IDLE <span className="text-[10px] text-muted-foreground font-normal">WAITING</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Status</span>
+            <span className="text-sm font-bold font-mono text-muted-foreground">IDLE</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Mode</div>
-            <div className="text-xl font-bold font-mono text-foreground">
-              DOCKER <span className="text-[10px] text-muted-foreground font-normal">V2</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Mode</span>
+            <span className="text-sm font-bold font-mono text-foreground">YAML</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <Button variant="outline" size="sm" onClick={loadDroids}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            REFRESH
+        <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" onClick={loadDroids} className="h-8 w-8" title="Refresh">
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                NEW DROID
+              <Button size="sm" className="h-8 text-xs px-3">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                NEW
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -150,46 +141,46 @@ export default function DroidsManager() {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <div className="border border-border">
         {droids.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Bot className="h-12 w-12 mb-4 opacity-50" />
-            <p>No droids found</p>
-            <p className="text-sm">Create droids in ~/.factory/droids/</p>
+            <Bot className="h-10 w-10 mb-3 opacity-40" />
+            <p className="text-sm">No droids found</p>
+            <p className="text-xs text-muted-foreground/70">~/.factory/droids/</p>
           </div>
         ) : (
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Path</TableHead>
-                <TableHead className="w-[100px] text-right">Actions</TableHead>
+              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableHead className="text-[10px] tracking-wider">NAME</TableHead>
+                <TableHead className="text-[10px] tracking-wider">PATH</TableHead>
+                <TableHead className="w-[90px] text-right text-[10px] tracking-wider">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {droids.map((droid) => (
                 <TableRow key={droid.name}>
-                  <TableCell className="font-medium">{droid.name}</TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-sm">{droid.path}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableCell className="font-medium text-sm py-2">{droid.name}</TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs py-2">{droid.path}</TableCell>
+                  <TableCell className="py-2">
+                    <div className="flex items-center justify-end gap-0.5">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-7 w-7"
                         onClick={() => handleOpenDroid(droid.path)}
                         title="Open in Editor"
                       >
-                        <FileText className="h-4 w-4" />
+                        <FileText className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         onClick={() => setDroidToDelete(droid.name)}
                         title="Delete"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </TableCell>

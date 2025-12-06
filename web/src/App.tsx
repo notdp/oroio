@@ -131,65 +131,61 @@ export default function App() {
       <div className="max-w-5xl mx-auto space-y-8 relative z-10">
 
         {/* Header Section */}
-        <header className="border-b border-border pb-6 space-y-4">
+        <header className="border-b border-border pb-4">
           <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-4">
               <h1 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
                 <Terminal className="w-5 h-5" />
-                <span className="font-pixel text-lg tracking-tighter mt-1 text-primary leading-none">OROIO</span>
+                <span className="font-pixel text-base tracking-tighter mt-0.5 text-primary leading-none">OROIO</span>
               </h1>
+              <button
+                className={cn(
+                  "flex items-center gap-2 text-xs px-2.5 py-1 border border-border bg-card",
+                  dkMissing && "cursor-pointer hover:bg-muted transition-colors border-amber-500/30"
+                )}
+                onClick={async () => {
+                  if (dkMissing && isElectron) {
+                    const result = await checkDk();
+                    if (result && !result.installed) {
+                      showDkMissingToast(result.installCmd);
+                    }
+                  }
+                }}
+                disabled={!dkMissing}
+              >
+                <span className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  dkMissing ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                )} />
+                <span className={cn(
+                  "text-[10px] tracking-wider",
+                  dkMissing ? "text-amber-500" : "text-muted-foreground"
+                )}>
+                  {dkMissing ? "DK_MISSING" : "CONNECTED"}
+                </span>
+              </button>
             </div>
 
-            <div className="flex items-center gap-4 text-xs">
-              <div className="flex items-center gap-2 text-muted-foreground mr-4 border-r border-border pr-4 h-full">
-
-                <button
-                  className={cn(
-                    "flex items-center gap-2",
-                    dkMissing && "cursor-pointer hover:opacity-80 transition-opacity"
-                  )}
-                  onClick={async () => {
-                    if (dkMissing && isElectron) {
-                      const result = await checkDk();
-                      if (result && !result.installed) {
-                        showDkMissingToast(result.installCmd);
-                      }
-                    }
-                  }}
-                  disabled={!dkMissing}
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full animate-pulse",
-                    dkMissing ? "bg-amber-500" : "bg-emerald-500"
-                  )} />
-                  <span className={cn(
-                    dkMissing && "text-amber-500 font-bold"
-                  )}>
-                    {dkMissing ? "STATUS: DK MISSING" : "STATUS: CONNECTED"}
-                  </span>
-                </button>
-              </div>
-
-              <div className="flex items-center border border-border select-none bg-background">
+            <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center border border-border select-none bg-card">
                 <button
                   onClick={() => { sound.toggleSound(); setTheme('light'); }}
                   className={cn(
-                    "px-3 py-1 transition-all hover:text-foreground text-[10px] tracking-wider font-medium",
+                    "px-2.5 py-1.5 transition-all text-[10px] tracking-wider font-medium",
                     theme === 'light'
-                      ? "bg-primary text-primary-foreground font-bold"
-                      : "text-muted-foreground hover:bg-muted"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
                 >
                   LIGHT
                 </button>
-                <div className="w-[1px] h-3 bg-border" />
                 <button
                   onClick={() => { sound.toggleSound(); setTheme('dark'); }}
                   className={cn(
-                    "px-3 py-1 transition-all hover:text-foreground text-[10px] tracking-wider font-medium",
+                    "px-2.5 py-1.5 transition-all text-[10px] tracking-wider font-medium",
                     theme === 'dark'
-                      ? "bg-primary text-primary-foreground font-bold"
-                      : "text-muted-foreground hover:bg-muted"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
                 >
                   DARK
@@ -200,67 +196,54 @@ export default function App() {
                 href="https://github.com/notdp/oroio"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-1 border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-[10px] tracking-wider font-medium"
+                className="flex items-center justify-center w-8 h-8 border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                 title="View Source on GitHub"
               >
-                <Github className="w-3 h-3" />
-                <span>GITHUB</span>
+                <Github className="w-3.5 h-3.5" />
               </a>
 
               <button
                 onClick={() => sound.toggle()}
-                className="flex items-center gap-2 px-3 py-1 border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-[10px] tracking-wider font-medium"
+                className="flex items-center justify-center w-8 h-8 border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                 title={sound.muted ? "Unmute sounds" : "Mute sounds"}
               >
-                {sound.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                <span>{sound.muted ? 'MUTED' : 'SOUND'}</span>
+                {sound.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
         </header>
 
         {/* Navigation */}
-        {/* Navigation */}
         <nav className="flex items-center justify-between w-full">
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            {tabs.map(({ id, label }) => {
+          <div className="flex items-center gap-0.5 text-sm border border-border bg-card p-1">
+            {tabs.map(({ id, label, icon: Icon }) => {
               const isActive = activeTab === id;
               return (
                 <button
                   key={id}
                   onClick={() => { sound.click(); setActiveTab(id); }}
                   className={cn(
-                    "group relative px-2 py-1 transition-all duration-200 outline-none focus:ring-1 focus:ring-primary",
+                    "relative px-3 py-1.5 transition-all duration-150 outline-none flex items-center gap-2 text-xs tracking-wide",
                     isActive
-                      ? "text-primary font-bold"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "text-primary-foreground bg-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
                 >
-                  <span className="mr-1 opacity-100 transition-opacity">
-                    {isActive ? '[' : '\u00A0'}
-                  </span>
-                  {label}
-                  <span className="ml-1 opacity-100 transition-opacity">
-                    {isActive ? ']' : '\u00A0'}
-                  </span>
-
-                  {/* Hover effect for non-active */}
-                  {!isActive && (
-                    <span className="absolute inset-0 border border-transparent group-hover:border-dashed group-hover:border-muted-foreground/50 pointer-events-none" />
-                  )}
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{label}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground opacity-50 hover:opacity-100 transition-opacity">
+          <div className="hidden md:flex items-center gap-2 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
             <span className="tracking-wider text-[10px]">NAVIGATE</span>
-            <Kbd className="text-[10px] min-w-[20px] h-5 flex items-center justify-center px-1.5 bg-background border border-border shadow-sm">Tab</Kbd>
+            <Kbd className="text-[10px] min-w-[20px] h-5 flex items-center justify-center px-1.5 bg-card border border-border">Tab</Kbd>
           </div>
         </nav>
 
         {/* Main Content Area */}
-        <main className="border border-border p-6 min-h-[600px] relative">
+        <main className="border border-border bg-card p-6 min-h-[500px] relative">
           {activeTab === 'keys' && <KeyList />}
           {activeTab === 'commands' && <CommandsManager />}
           {activeTab === 'skills' && <SkillsManager />}
@@ -269,13 +252,9 @@ export default function App() {
         </main>
 
         {/* Footer */}
-        <footer className="text-xs text-muted-foreground border-t border-border pt-4 flex justify-between items-center">
-          <div>
-            Running process: PID {fakePid}
-          </div>
-          <div>
-            MEM usage: {fakeMemory}MB
-          </div>
+        <footer className="text-[10px] text-muted-foreground/50 pt-3 flex justify-between items-center tracking-wider">
+          <span>PID:{fakePid}</span>
+          <span>MEM:{fakeMemory}MB</span>
         </footer>
       </div>
     </div>

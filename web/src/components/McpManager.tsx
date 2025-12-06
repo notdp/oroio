@@ -120,47 +120,38 @@ export default function McpManager() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2 md:gap-4">
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Total Servers</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              {servers.length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">MCP</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Total</span>
+            <span className="text-sm font-bold font-mono text-primary">{servers.length.toString().padStart(2, '0')}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">STDIO</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              {servers.filter(s => s.type !== 'http').length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">PIPE</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">STDIO</span>
+            <span className="text-sm font-bold font-mono text-primary">{servers.filter(s => s.type !== 'http').length.toString().padStart(2, '0')}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">HTTP</div>
-            <div className="text-xl font-bold font-mono text-foreground">
-              {servers.filter(s => s.type === 'http').length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">NET</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">HTTP</span>
+            <span className="text-sm font-bold font-mono text-foreground">{servers.filter(s => s.type === 'http').length.toString().padStart(2, '0')}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <Button variant="outline" size="sm" onClick={loadServers}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            REFRESH
+        <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" onClick={loadServers} className="h-8 w-8" title="Refresh">
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-          <Button size="sm" onClick={() => setAddDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            ADD SERVER
+          <Button size="sm" className="h-8 text-xs px-3" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            ADD
           </Button>
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <div className="border border-border">
         {servers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Plug className="h-12 w-12 mb-4 opacity-50" />
-            <p>No MCP servers configured</p>
-            <p className="text-sm">Add servers in ~/.factory/mcp.json</p>
+            <Plug className="h-10 w-10 mb-3 opacity-40" />
+            <p className="text-sm">No MCP servers configured</p>
+            <p className="text-xs text-muted-foreground/70">~/.factory/mcp.json</p>
           </div>
         ) : (
           <div className="divide-y">

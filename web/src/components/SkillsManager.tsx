@@ -93,39 +93,30 @@ export default function SkillsManager() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2 md:gap-4">
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Total Skills</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              {skills.length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">ITEMS</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Total</span>
+            <span className="text-sm font-bold font-mono text-primary">{skills.length.toString().padStart(2, '0')}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Format</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              .MD <span className="text-[10px] text-muted-foreground font-normal">TEXT</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Format</span>
+            <span className="text-sm font-bold font-mono text-primary">.MD</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Expansion</div>
-            <div className="text-xl font-bold font-mono text-foreground">
-              AUTO <span className="text-[10px] text-muted-foreground font-normal">ON</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Expand</span>
+            <span className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-500">AUTO</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <Button variant="outline" size="sm" onClick={loadSkills}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            REFRESH
+        <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" onClick={loadSkills} className="h-8 w-8" title="Refresh">
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                NEW SKILL
+              <Button size="sm" className="h-8 text-xs px-3">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                NEW
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -150,55 +141,55 @@ export default function SkillsManager() {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <div className="border border-border">
         {skills.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Sparkles className="h-12 w-12 mb-4 opacity-50" />
-            <p>No skills found</p>
-            <p className="text-sm">Create skills in .factory/skills/[name]/SKILL.md</p>
+            <Sparkles className="h-10 w-10 mb-3 opacity-40" />
+            <p className="text-sm">No skills found</p>
+            <p className="text-xs text-muted-foreground/70">.factory/skills/[name]/SKILL.md</p>
           </div>
         ) : (
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Path</TableHead>
-                <TableHead className="w-[100px] text-right">Actions</TableHead>
+              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableHead className="text-[10px] tracking-wider">NAME</TableHead>
+                <TableHead className="text-[10px] tracking-wider">PATH</TableHead>
+                <TableHead className="w-[90px] text-right text-[10px] tracking-wider">ACTIONS</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {skills.map((skill) => (
                 <TableRow key={skill.name}>
-                  <TableCell className="font-medium">{skill.name}</TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-sm">{skill.path}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableCell className="font-medium text-sm py-2">{skill.name}</TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs py-2">{skill.path}</TableCell>
+                  <TableCell className="py-2">
+                    <div className="flex items-center justify-end gap-0.5">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-7 w-7"
                         onClick={() => handleOpenSkill(skill.path)}
                         title="Open in Editor"
                       >
-                        <FileText className="h-4 w-4" />
+                        <FileText className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-7 w-7"
                         onClick={() => handleOpenSkill(skill.path.replace('/SKILL.md', ''))}
                         title="Open Folder"
                       >
-                        <FolderOpen className="h-4 w-4" />
+                        <FolderOpen className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         onClick={() => setSkillToDelete(skill.name)}
                         title="Delete"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </TableCell>

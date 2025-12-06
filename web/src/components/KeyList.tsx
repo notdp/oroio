@@ -33,7 +33,7 @@ function formatNumber(n: number | null): string {
 
 function UsageCell({ usage }: { usage: KeyUsage | null }) {
   if (!usage || usage.total === null) {
-    return <span className="text-muted-foreground">-</span>;
+    return <span className="text-muted-foreground text-xs">-</span>;
   }
 
   const used = usage.used ?? 0;
@@ -42,15 +42,15 @@ function UsageCell({ usage }: { usage: KeyUsage | null }) {
   const isZero = usage.balance != null && usage.balance <= 0;
 
   return (
-    <div className="flex flex-col gap-1 min-w-[180px]">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+    <div className="flex flex-col gap-1 min-w-[140px]">
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground tracking-wider">
         <span>{formatNumber(used)} / {formatNumber(total)}</span>
       </div>
       <Progress
         value={used}
         max={total}
-        className="w-full h-2"
-        indicatorClassName={isZero ? 'bg-destructive' : isLow ? 'bg-yellow-500' : 'bg-green-500'}
+        className="w-full h-1.5"
+        indicatorClassName={isZero ? 'bg-destructive' : isLow ? 'bg-amber-500' : 'bg-emerald-500'}
       />
     </div>
   );
@@ -296,41 +296,34 @@ export default function KeyList() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-2 md:gap-4">
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Active Index</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              #{keys.find(k => k.isCurrent)?.index || '?'} <span className="text-[10px] text-muted-foreground font-normal">CURRENT</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Active</span>
+            <span className="text-sm font-bold font-mono text-primary">#{keys.find(k => k.isCurrent)?.index || '?'}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[140px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Total Keys</div>
-            <div className="text-xl font-bold font-mono text-primary">
-              {keys.length.toString().padStart(2, '0')} <span className="text-[10px] text-muted-foreground font-normal">NODES</span>
-            </div>
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Total</span>
+            <span className="text-sm font-bold font-mono text-primary">{keys.length.toString().padStart(2, '0')}</span>
           </div>
-
-          <div className="px-4 py-2 border border-border bg-card/50 min-w-[180px]">
-            <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Global Consumption</div>
-            <div className="text-xl font-bold font-mono text-foreground">
+          <div className="px-3 py-1.5 border border-border bg-card flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Usage</span>
+            <span className="text-sm font-bold font-mono text-foreground">
               {formatNumber(keys.reduce((acc, k) => acc + (k.usage?.used || 0), 0))}
-              <span className="text-muted-foreground mx-1">/</span>
-              {formatNumber(keys.reduce((acc, k) => acc + (k.usage?.total || 0), 0))}
-            </div>
+              <span className="text-muted-foreground mx-0.5 text-xs">/</span>
+              <span className="text-muted-foreground">{formatNumber(keys.reduce((acc, k) => acc + (k.usage?.total || 0), 0))}</span>
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            REFRESH
+        <div className="flex items-center gap-1.5 ml-auto">
+          <Button variant="outline" size="icon" onClick={handleRefresh} disabled={refreshing} className="h-8 w-8" title="Refresh">
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
           <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                ADD KEY
+              <Button size="sm" className="h-8 text-xs px-3">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                ADD
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -355,17 +348,17 @@ export default function KeyList() {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card">
+      <div className="border border-border">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-12"></TableHead>
-              <TableHead className="w-12">No</TableHead>
-              <TableHead>Key</TableHead>
-              <TableHead>Usage</TableHead>
-              <TableHead className="w-24 text-right">Used</TableHead>
-              <TableHead className="pl-8">Expiry</TableHead>
-              <TableHead className="w-[100px] text-right">Actions</TableHead>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-12 text-[10px] tracking-wider">#</TableHead>
+              <TableHead className="text-[10px] tracking-wider">KEY</TableHead>
+              <TableHead className="text-[10px] tracking-wider">USAGE</TableHead>
+              <TableHead className="w-20 text-right text-[10px] tracking-wider">%</TableHead>
+              <TableHead className="pl-6 text-[10px] tracking-wider">EXPIRY</TableHead>
+              <TableHead className="w-[90px] text-right text-[10px] tracking-wider">ACTIONS</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -376,67 +369,67 @@ export default function KeyList() {
               return (
                 <TableRow
                   key={info.index}
-                  className={info.isCurrent
-                    ? 'bg-green-50/60 hover:bg-green-100/60 dark:bg-green-900/20 dark:hover:bg-green-900/30'
-                    : ''
-                  }
+                  className={cn(
+                    "transition-colors",
+                    info.isCurrent && "bg-primary/5 hover:bg-primary/10"
+                  )}
                 >
-                  <TableCell>
+                  <TableCell className="py-2">
                     <div
                       className={cn(
-                        "flex items-center justify-center w-8 h-8 rounded-full cursor-pointer transition-colors",
+                        "flex items-center justify-center w-7 h-7 cursor-pointer transition-colors",
                         info.isCurrent
-                          ? "text-green-600 dark:text-green-400"
+                          ? "text-emerald-600 dark:text-emerald-500"
                           : "text-muted-foreground/30 hover:text-primary"
                       )}
                       onClick={() => !info.isCurrent && handleUseKey(info.index)}
                       title={info.isCurrent ? "Currently Active" : "Set as Active"}
                     >
                       {info.isCurrent ? (
-                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-500" />
+                        <CheckCircle2 className="h-4 w-4" />
                       ) : (
-                        <Circle className="h-5 w-5" />
+                        <Circle className="h-4 w-4" />
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="font-medium">
+                  <TableCell className="font-medium text-sm py-2">
                     {info.index}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2">
                     <KeyDisplay
                       keyText={info.key}
                       isCurrent={info.isCurrent}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-2">
                     <UsageCell usage={info.usage} />
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                  <TableCell className="text-right font-mono text-xs text-muted-foreground py-2">
                     {info.usage?.total ? `${percent}%` : '-'}
                   </TableCell>
-                  <TableCell className="pl-8">
+                  <TableCell className="pl-6 py-2">
                     {isInvalid ? (
-                      <Badge variant="destructive">Invalid</Badge>
+                      <Badge variant="destructive" className="text-[10px]">INVALID</Badge>
                     ) : (
-                      <span className="text-sm">{info.usage?.expires || '-'}</span>
+                      <span className="text-xs text-muted-foreground">{info.usage?.expires || '-'}</span>
                     )}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableCell className="py-2">
+                    <div className="flex items-center justify-end gap-0.5">
                       <IconCopyButton
                         text={`export FACTORY_API_KEY=${info.key}`}
                         icon={Terminal}
                         title="Copy Export Command"
+                        className="h-7 w-7"
                       />
-
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         onClick={() => handleRemoveKey(info.index)}
                         title="Delete Key"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </TableCell>

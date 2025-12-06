@@ -59,50 +59,49 @@
 :root {
   --radius: 0rem;
 
-  /* VS Code Quiet Light Inspired */
-  --background: #F5F3F1;
-  --foreground: #434343;
+  /* Quiet Light (VSCode) */
+  --background: #F5F5F5;
+  --foreground: #333333;
 
-  --card: #EDEDF5;
-  --card-foreground: #434343;
+  --card: #F2F2F2;
+  --card-foreground: #333333;
 
-  --popover: #EDEDF5;
-  --popover-foreground: #434343;
+  --popover: #F2F2F2;
+  --popover-foreground: #333333;
 
   --primary: #705697;
-  /* Muted Purple */
   --primary-foreground: #FFFFFF;
 
-  --secondary: #E0E0E0;
-  --secondary-foreground: #434343;
+  --secondary: #EDEDF5;
+  --secondary-foreground: #333333;
 
   --muted: #E0E0E0;
-  --muted-foreground: #707070;
+  --muted-foreground: #6D705B;
 
-  --accent: #EAE8E6;
+  --accent: #c4b7d7;
   --accent-foreground: #705697;
 
-  --destructive: #C44346;
+  --destructive: #C73D20;
   --destructive-foreground: #FFFFFF;
 
-  --border: #D3D3D3;
-  --input: #D3D3D3;
-  --ring: #705697;
+  --border: #C9D0D9;
+  --input: #C9D0D9;
+  --ring: #9769dc;
 
   --chart-1: #705697;
-  --chart-2: #4B69C6;
-  --chart-3: #448C27;
+  --chart-2: #749351;
+  --chart-3: #9C5D27;
   --chart-4: #AA3731;
-  --chart-5: #917B01;
+  --chart-5: #4B69C6;
 
-  --sidebar: #EDEDF5;
-  --sidebar-foreground: #434343;
+  --sidebar: #F2F2F2;
+  --sidebar-foreground: #333333;
   --sidebar-primary: #705697;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #E0E0E0;
+  --sidebar-accent: #ede8ef;
   --sidebar-accent-foreground: #705697;
-  --sidebar-border: #D3D3D3;
-  --sidebar-ring: #705697;
+  --sidebar-border: #C9D0D9;
+  --sidebar-ring: #9769dc;
 }
 
 .dark {
@@ -182,28 +181,7 @@
   }
 
   .scanline {
-    background: linear-gradient(to bottom,
-        rgba(255, 255, 255, 0),
-        rgba(255, 255, 255, 0) 50%,
-        rgba(0, 0, 0, 0.2) 50%,
-        rgba(0, 0, 0, 0.2));
-    background-size: 100% 4px;
-    animation: scanline 10s linear infinite;
-    pointer-events: none;
-    z-index: 50;
-    position: fixed;
-    inset: 0;
-    opacity: 0.15;
-  }
-
-  @keyframes scanline {
-    0% {
-      background-position: 0 0;
-    }
-
-    100% {
-      background-position: 0 100%;
-    }
+    display: none;
   }
 
   .text-glow {
