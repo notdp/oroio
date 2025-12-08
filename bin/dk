@@ -6,7 +6,38 @@ DKM_HOME="$HOME/.oroio"
 KEYS_ENC_FILE="$DKM_HOME/keys.enc"   # 加密存储的 keys
 CURRENT_FILE="$DKM_HOME/current"     # 保存当前key的行号（从1开始）
 DKM_CACHE_FILE="$DKM_HOME/list_cache.b64"
+DKM_CONFIG_FILE="$DKM_HOME/config"   # 用户配置文件
 DKM_SALT="oroio"
+
+config_get() {
+  local key="$1" default="${2:-}"
+  [[ -f "$DKM_CONFIG_FILE" ]] || { echo "$default"; return; }
+  local val
+  val=$(grep "^${key}=" "$DKM_CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+  echo "${val:-$default}"
+}
+
+config_set() {
+  local key="$1" val="$2"
+  mkdir -p "$DKM_HOME"
+  if [[ -f "$DKM_CONFIG_FILE" ]]; then
+    grep -v "^${key}=" "$DKM_CONFIG_FILE" > "$DKM_CONFIG_FILE.tmp" 2>/dev/null || true
+    mv "$DKM_CONFIG_FILE.tmp" "$DKM_CONFIG_FILE"
+  fi
+  echo "${key}=${val}" >> "$DKM_CONFIG_FILE"
+}
+
+load_config() {
+  [[ -f "$DKM_CONFIG_FILE" ]] || return 0
+  while IFS='=' read -r k v; do
+    [[ "$k" =~ ^[a-z_]+$ ]] || continue
+    case "$k" in
+      ascii) DKM_ASCII="${DKM_ASCII:-$v}" ;;
+    esac
+  done < "$DKM_CONFIG_FILE"
+}
+
+load_config
 
 # 可调优的 curl 限制，避免长时间等待慢/无效请求
 DKM_CURL_MAX_TIME="${DKM_CURL_MAX_TIME:-4}"        # 单请求超时（秒）
@@ -17,11 +48,15 @@ DKM_LIST_JOBS="${DKM_LIST_JOBS:-0}"                # 0 表示自动 min(DKM_LIST
 DKM_CACHE_TTL="${DKM_CACHE_TTL:-30}"                # list 结果缓存 TTL（秒，0 关闭）
 
 use_ascii_borders() {
-  # locale 中未包含 UTF-8 时退回 ASCII；亦可通过 DKM_ASCII=1 强制 ASCII
-  if [[ "${DKM_ASCII:-}" == "1" ]]; then return 0; fi
+  # 环境变量/配置优先
+  [[ "${DKM_ASCII:-}" == "1" ]] && return 0  # ASCII
+  [[ "${DKM_ASCII:-}" == "0" ]] && return 1  # Unicode
+  
+  # 无配置 → 智能检测
   local lc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
-  [[ "$lc" =~ [Uu][Tt][Ff]-?8 ]] && return 1
-  return 0
+  [[ "$lc" =~ ^C\.UTF-?8$ ]] && return 0     # C.UTF-8 → ASCII
+  [[ "$lc" =~ UTF-?8 ]] && return 1          # 其他 UTF-8 → Unicode
+  return 0                                    # 无 UTF-8 → ASCII
 }
 
 if use_ascii_borders; then
@@ -44,6 +79,7 @@ Commands:
   use [index]            switch key (interactive if no index)
   run <cmd...>           run with key (auto-rotate on zero balance)
   serve [start|stop|status]  web dashboard (default: start, port 7758)
+  config                 interactive configuration menu
   uninstall [options]    uninstall dk (wrapper around uninstall.sh)
   reinstall [options]    reinstall dk (wrapper around reinstall.sh)
   rm <index...>          remove keys
@@ -1330,6 +1366,49 @@ cmd_serve() {
   esac
 }
 
+config_border() {
+  local current_ascii=$(config_get ascii "")
+  local opt_unicode="Unicode" opt_ascii="ASCII"
+  
+  # 有配置才显示下划线
+  if [[ "$current_ascii" == "1" ]]; then
+    opt_ascii=$'\033[4mASCII\033[0m'
+  elif [[ "$current_ascii" == "0" ]]; then
+    opt_unicode=$'\033[4mUnicode\033[0m'
+  fi
+  # 无配置 → 都不加下划线
+
+  local opts=("[1] $opt_unicode" "[2] $opt_ascii")
+  local sel
+  if sel=$(prompt_select "Border style (↑/↓, j/k, Enter, q=back)" "${opts[@]}"); then
+    local new_val="$sel"
+    config_set ascii "$new_val"
+    local label
+    [[ "$new_val" == "1" ]] && label="ASCII" || label="Unicode"
+    echo "Saved: Border style = $label"
+    echo "Run 'dk list' to see the change."
+  fi
+}
+
+cmd_config() {
+  if [ ! -t 0 ] || [ ! -t 2 ]; then
+    die "config 需要交互式终端"
+  fi
+
+  local border_label
+  use_ascii_borders && border_label="ASCII" || border_label="Unicode"
+
+  local opts=("[1] Border style: $border_label")
+  local sel
+  if ! sel=$(prompt_select "Select config (↑/↓, j/k, Enter, q=quit)" "${opts[@]}"); then
+    return 0
+  fi
+
+  case "$sel" in
+    0) config_border ;;
+  esac
+}
+
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
@@ -1339,6 +1418,7 @@ main() {
     use) cmd_use "$@";;
     run) check_python3; cmd_run "$@";;
     serve) cmd_serve "$@";;
+    config) cmd_config "$@";;
     rm|remove|del) cmd_rm "$@";;
     uninstall) cmd_uninstall "$@";;
     reinstall) cmd_reinstall "$@";;
