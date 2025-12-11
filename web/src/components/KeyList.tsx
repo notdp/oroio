@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Trash2, Plus, RefreshCw, Terminal, CheckCircle2, Copy, Circle, X, AlertTriangle, Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
+import { Trash2, Plus, RefreshCw, Terminal, CheckCircle2, Copy, Circle, X, AlertTriangle, Download, Upload, ArrowUp, ArrowDown, ChevronsUpDown, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { sounds } from '@/lib/sound';
 import { decryptKeys, maskKey } from '@/utils/crypto';
@@ -38,6 +38,27 @@ interface SortConfig {
 }
 
 const SORT_STORAGE_KEY = 'oroio-key-sort';
+const NOTES_STORAGE_KEY = 'oroio-key-notes';
+
+function loadNotes(): Record<string, string> {
+  try {
+    const saved = localStorage.getItem(NOTES_STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {
+    // ignore parse errors
+  }
+  return {};
+}
+
+function saveNote(key: string, note: string) {
+  const notes = loadNotes();
+  if (note.trim()) {
+    notes[key] = note;
+  } else {
+    delete notes[key];
+  }
+  localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notes));
+}
 
 function loadSortConfig(): SortConfig {
   try {
@@ -122,6 +143,61 @@ function KeyDisplay({ keyText, isCurrent, className }: { keyText: string, isCurr
   );
 }
 
+function NoteCell({ keyText, onUpdate }: { keyText: string; onUpdate: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [note, setNote] = useState(() => loadNotes()[keyText] || '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [editing]);
+
+  const handleSave = () => {
+    saveNote(keyText, note);
+    setEditing(false);
+    onUpdate();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave();
+    } else if (e.key === 'Escape') {
+      setNote(loadNotes()[keyText] || '');
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={handleKeyDown}
+        className="w-full px-1.5 py-0.5 text-xs bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+        placeholder="Note..."
+      />
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-1 group cursor-pointer min-h-[24px]"
+      onClick={() => setEditing(true)}
+      title="Click to edit"
+    >
+      <span className="text-xs text-muted-foreground">
+        {note || '-'}
+      </span>
+      <Pencil className="h-3 w-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </div>
+  );
+}
+
 function IconCopyButton({ text, icon: Icon, title, className }: { text: string; icon: any; title: string; className?: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -202,6 +278,7 @@ export default function KeyList() {
   const [adding, setAdding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig>(loadSortConfig);
+  const [, setNotesVersion] = useState(0);
 
   const handleSort = (field: SortField) => {
     const newConfig: SortConfig = {
@@ -474,11 +551,12 @@ export default function KeyList() {
         <Table className="table-fixed">
           <colgroup>
             <col style={{ width: '4%' }} />
-            <col style={{ width: '5%' }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '18%' }} />
-            <col style={{ width: '18%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '15%' }} />
             <col style={{ width: '10%' }} />
           </colgroup>
           <TableHeader>
@@ -486,6 +564,7 @@ export default function KeyList() {
               <TableHead></TableHead>
               <TableHead className="text-xs tracking-wider">NO</TableHead>
               <TableHead className="text-xs tracking-wider">KEY</TableHead>
+              <TableHead className="text-xs tracking-wider">NOTE</TableHead>
               <SortableHeader field="percent" label="%" align="right" sortConfig={sortConfig} onSort={handleSort} />
               <SortableHeader field="quota" label="QUOTA" align="right" sortConfig={sortConfig} onSort={handleSort} />
               <SortableHeader field="expiry" label="EXPIRY" align="center" sortConfig={sortConfig} onSort={handleSort} />
@@ -536,6 +615,9 @@ export default function KeyList() {
                       keyText={info.key}
                       isCurrent={info.isCurrent}
                     />
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <NoteCell keyText={info.key} onUpdate={() => setNotesVersion(v => v + 1)} />
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm text-muted-foreground py-2">
                     {info.usage?.total ? `${percent}%` : '-'}
