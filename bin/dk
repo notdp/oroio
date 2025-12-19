@@ -1197,8 +1197,15 @@ cmd_use() {
 cmd_run() {
   ensure_store
   load_keys
-  [ ${#KEYS[@]} -gt 0 ] || die "暂无key"
   [ $# -ge 1 ] || die "用法: dk run <命令...>"
+
+  if [ ${#KEYS[@]} -eq 0 ]; then
+    printf "No keys configured, starting without FACTORY_API_KEY.\n" >&2
+    unset FACTORY_API_KEY
+    "$@"
+    return
+  fi
+
   local idx=$(current_index)
   (( idx <= ${#KEYS[@]} )) || idx=1
   IFS=$'\t' read -r key _ <<<"${KEYS[$((idx-1))]}"

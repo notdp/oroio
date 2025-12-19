@@ -714,7 +714,7 @@ function Cmd-Current {
     $keys = @(Decrypt-Keys)
     
     if ($keys.Length -eq 0) {
-        Write-ErrorExit "暂无key，请先添加。"
+        Write-ErrorExit "暂无key，请先使用 'dk add <key>' 添加。"
     }
     
     $idx = Get-CurrentIndex
@@ -781,23 +781,24 @@ function Cmd-Run {
     Ensure-Store
     $keys = @(Decrypt-Keys)
     
-    if ($keys.Length -eq 0) {
-        Write-ErrorExit "暂无key，请先添加。"
-    }
-    
-    $idx = Get-CurrentIndex
-    if ($idx -gt $keys.Length) { $idx = 1 }
-    
-    $key = $keys[$idx - 1]
-    $masked = Mask-Key -Key $key
-    Write-Host "Using key #$idx ($masked)"
-
-    $env:FACTORY_API_KEY = $key
-
     $cmd = $RunArgs[0]
     $cmdArgs = @()
     if ($RunArgs.Length -gt 1) {
         $cmdArgs = $RunArgs[1..($RunArgs.Length - 1)]
+    }
+
+    if ($keys.Length -eq 0) {
+        Write-Host "No keys configured, starting without FACTORY_API_KEY."
+        Remove-Item Env:FACTORY_API_KEY -ErrorAction SilentlyContinue
+    } else {
+        $idx = Get-CurrentIndex
+        if ($idx -gt $keys.Length) { $idx = 1 }
+        
+        $key = $keys[$idx - 1]
+        $masked = Mask-Key -Key $key
+        Write-Host "Using key #$idx ($masked)"
+
+        $env:FACTORY_API_KEY = $key
     }
 
     $cmdApp = Get-Command $cmd -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
