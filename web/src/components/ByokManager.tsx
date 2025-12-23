@@ -188,6 +188,7 @@ export default function ByokManager() {
   const [error, setError] = useState<string | null>(null);
   const [expandedModel, setExpandedModel] = useState<number | null>(null);
   const [copiedModel, setCopiedModel] = useState<number | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<number | null>(null);
   const [showApiKeys, setShowApiKeys] = useState<Set<number>>(new Set());
   
@@ -225,6 +226,14 @@ export default function ByokManager() {
     await navigator.clipboard.writeText(getModelConfig(model));
     setCopiedModel(index);
     setTimeout(() => setCopiedModel(null), 2000);
+  };
+
+  const handleCopyAll = async () => {
+    if (models.length === 0) return;
+    const allConfigs = JSON.stringify({ custom_models: models }, null, 2);
+    await navigator.clipboard.writeText(allConfigs);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
   };
 
   const openAddDialog = () => {
@@ -336,6 +345,11 @@ export default function ByokManager() {
         </div>
 
         <div className="flex items-center gap-1.5 ml-auto">
+          {models.length > 0 && (
+            <Button variant="outline" size="icon" onClick={handleCopyAll} className="h-8 w-8" title="Copy all configs">
+              {copiedAll ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          )}
           <Button variant="outline" size="icon" onClick={loadModels} className="h-8 w-8" title="Refresh">
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
