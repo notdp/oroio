@@ -42,7 +42,4 @@ jobs:
             Pre-built web assets for `dk serve`.
             
             These files are automatically downloaded during installation.
-          files: |
-            web/dist/index.html
-            web/dist/assets/*
-          fail_on_unmatched_files: true
+          files: web/dist/index.html
