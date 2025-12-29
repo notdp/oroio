@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { viteSingleFile } from 'vite-plugin-singlefile'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -340,7 +341,13 @@ Command instructions here.
 
 export default defineConfig({
   base: './',
-  plugins: [react(), tailwindcss(), oroioDataPlugin(), factoryApiPlugin()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    viteSingleFile({ removeViteModuleLoader: true }),
+    oroioDataPlugin(),
+    factoryApiPlugin(),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -348,11 +355,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    assetsInlineLimit: 100000000,
+    chunkSizeWarningLimit: 100000000,
+    cssCodeSplit: false,
     rollupOptions: {
       output: {
-        entryFileNames: 'assets/index.js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]',
+        inlineDynamicImports: true,
+        manualChunks: undefined,
       },
     },
   },

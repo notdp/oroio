@@ -56,15 +56,11 @@ Invoke-WebRequest -Uri "$serveUrl`?ts=$ts" -OutFile $servePath -UseBasicParsing
 # Prepare web dashboard assets to $OROIO_DIR\web
 Write-Info "Preparing web dashboard assets..."
 $webDst = Join-Path $OROIO_DIR "web"
-$assetsDst = Join-Path $webDst "assets"
 if (-not (Test-Path $webDst)) { New-Item -ItemType Directory -Path $webDst -Force | Out-Null }
-if (-not (Test-Path $assetsDst)) { New-Item -ItemType Directory -Path $assetsDst -Force | Out-Null }
 
 $webBase = "https://github.com/notdp/oroio/releases/download/web-dist"
 try {
     Invoke-WebRequest -Uri "$webBase/index.html`?ts=$ts" -OutFile (Join-Path $webDst "index.html") -UseBasicParsing
-    Invoke-WebRequest -Uri "$webBase/index.js`?ts=$ts" -OutFile (Join-Path $assetsDst "index.js") -UseBasicParsing
-    Invoke-WebRequest -Uri "$webBase/index.css`?ts=$ts" -OutFile (Join-Path $assetsDst "index.css") -UseBasicParsing
 }
 catch {
     Write-Warn "Failed to download web assets: $($_.Exception.Message)"

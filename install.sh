@@ -59,7 +59,7 @@ fetch_component() {
 fetch_web_assets() {
   make_tmpdir
   WEB_DIR="$DK_TMPDIR/web"
-  install -d "$WEB_DIR/assets"
+  install -d "$WEB_DIR"
 
   local base="https://github.com/notdp/oroio/releases/download/web-dist"
   local ts
@@ -67,10 +67,6 @@ fetch_web_assets() {
   printf '正在下载 web 资源...\n'
   curl -fsSL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${base}/index.html?ts=${ts}" \
     -o "$WEB_DIR/index.html" || die "下载 index.html 失败"
-  curl -fsSL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${base}/index.js?ts=${ts}" \
-    -o "$WEB_DIR/assets/index.js" || die "下载 index.js 失败"
-  curl -fsSL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${base}/index.css?ts=${ts}" \
-    -o "$WEB_DIR/assets/index.css" || die "下载 index.css 失败"
 }
 
 locate_sources() {
